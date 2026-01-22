@@ -1,5 +1,6 @@
 // index.js
-// Bootstrap + state authority for Strict Job Search v3
+// Bootstrap + state authority for Strict Job Search v3.2
+// Adds: Service Worker registration (restores installable PWA behavior)
 
 // ---- CONFIG ----
 
@@ -82,6 +83,28 @@ function bumpVersion(v) {
   return Number.isFinite(n) ? String(n + 1) : v;
 }
 
+// ---- SERVICE WORKER (PWA INSTALLABILITY) ----
+
+function registerServiceWorker() {
+  // SW requires secure context (https) except localhost
+  const isLocalhost =
+    location.hostname === 'localhost' ||
+    location.hostname === '127.0.0.1' ||
+    location.hostname === '[::1]';
+
+  if (!('serviceWorker' in navigator)) return;
+  if (!window.isSecureContext && !isLocalhost) return;
+
+  window.addEventListener('load', async () => {
+    try {
+      await navigator.serviceWorker.register('./sw.js', { scope: './' });
+      // No UI side-effects here. app.js controls visible behavior.
+    } catch (err) {
+      console.warn('Service worker registration failed:', err);
+    }
+  });
+}
+
 // ---- BOOTSTRAP ----
 
 async function bootstrap() {
@@ -105,6 +128,8 @@ async function bootstrap() {
 }
 
 // ---- INIT ----
+
+registerServiceWorker();
 
 bootstrap().catch(err => {
   console.error('Bootstrap failed:', err);

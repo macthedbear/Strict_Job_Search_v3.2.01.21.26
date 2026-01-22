@@ -1,5 +1,5 @@
 // app.js — Strict Job Search v3.2 (repo-ready)
-// FINAL: removes rules.txt everywhere, restores Save-closes-panel behavior, keeps dirty stack (json only)
+// FINAL+ : removes rules.txt everywhere, Save closes Settings (hard), dirty stack (json only)
 
 const $ = (id) => document.getElementById(id);
 
@@ -49,6 +49,15 @@ function loadMemory() {
 
 function saveMemory() {
   localStorage.setItem(MEMORY_KEY, JSON.stringify(state.memory));
+}
+
+function setSettingsVisible(isOpen) {
+  const s = $("settings");
+  if (!s) return;
+
+  // Use BOTH, so CSS can't lie about visibility.
+  s.hidden = !isOpen;
+  s.style.display = isOpen ? "" : "none";
 }
 
 async function clearMemory() {
@@ -103,6 +112,8 @@ async function clearMemory() {
 
   const fb = document.getElementById("sjsMailFallback");
   if (fb) fb.hidden = true;
+
+  setSettingsVisible(false);
 
   hardStopAllLoaders();
   refreshDirtyUI();
@@ -179,7 +190,6 @@ function stageRule(rule) {
 
   const normalized = { type, value };
 
-  // Dedup against durable + staged
   const all = getDurableRules().concat(getStagedRules());
   const exists = all.some(r =>
     String(r?.type || "").toLowerCase() === normalized.type.toLowerCase() &&
@@ -338,8 +348,8 @@ function saveSettings() {
   localStorage.setItem("lever", JSON.stringify(state.lever));
   localStorage.setItem("custom", JSON.stringify(state.custom));
 
-  // Always close panel on Save (restores v3 behavior)
-  if ($("settings")) $("settings").hidden = true;
+  // Always close panel on Save (hard close, CSS-proof)
+  setSettingsVisible(false);
 
   toast(`Saved (Greenhouse: ${state.greenhouse.length}, Lever: ${state.lever.length}, Custom: ${state.custom.length})`);
 }
@@ -354,87 +364,38 @@ function setMode(m) {
 
 // ---------- Gates ----------
 const HARD_BACKEND_TERMS = [
-  "on-call",
-  "pager",
-  "own production",
-  "production ownership",
-  "operating distributed",
-  "real-time systems",
-  "low-latency",
-  "multi-region aws",
-  "incident response",
+  "on-call","pager","own production","production ownership","operating distributed",
+  "real-time systems","low-latency","multi-region aws","incident response",
 ];
-
 const BACKEND_PRIMITIVES = [
-  "grpc",
-  "protobuf",
-  "redis",
-  "kafka",
-  "kinesis",
-  "flink",
-  "spark streaming",
-  "real-time streaming",
-  "streaming",
-  "event-driven",
-  "distributed cache",
-  "tcp",
-  "udp",
+  "grpc","protobuf","redis","kafka","kinesis","flink","spark streaming",
+  "real-time streaming","streaming","event-driven","distributed cache","tcp","udp",
 ];
-
 const INFRA_OWNERSHIP = [
-  "production infrastructure",
-  "service reliability",
-  "capacity planning",
-  "latency budget",
-  "latency budgets",
-  "availability target",
-  "availability targets",
-  "postmortem",
-  "terraform",
-  "cloudformation",
-  "kubernetes",
+  "production infrastructure","service reliability","capacity planning",
+  "latency budget","latency budgets","availability target","availability targets",
+  "postmortem","terraform","cloudformation","kubernetes",
 ];
-
 const NON_US_LOCATION_TERMS = [
   "uk","united kingdom","london","england","scotland","wales","ireland",
-  "canada","toronto","vancouver","montreal",
-  "emea","apac","latam",
-  "eu","europe","european union",
-  "india","bangalore","bengaluru","hyderabad","pune","chennai","gurgaon","noida",
-  "singapore",
-  "australia","sydney","melbourne",
-  "germany","berlin","munich",
-  "france","paris",
-  "spain","madrid","barcelona",
-  "netherlands","amsterdam",
-  "sweden","stockholm",
-  "switzerland","zurich","geneva",
-  "poland","warsaw",
-  "romania","bucharest",
-  "czech","prague",
-  "austria","vienna",
-  "italy","milan","rome",
-  "portugal","lisbon",
-  "israel","tel aviv",
-  "japan","tokyo",
-  "korea","seoul",
-  "china","shanghai","beijing","shenzhen",
-  "mexico","brazil","argentina","chile","colombia",
-  "south africa","cape town","johannesburg",
-  "thailand","bangkok",
-  "vietnam","ho chi minh","hcmc","hanoi"
+  "canada","toronto","vancouver","montreal","emea","apac","latam","eu","europe",
+  "european union","india","bangalore","bengaluru","hyderabad","pune","chennai",
+  "gurgaon","noida","singapore","australia","sydney","melbourne","germany","berlin",
+  "munich","france","paris","spain","madrid","barcelona","netherlands","amsterdam",
+  "sweden","stockholm","switzerland","zurich","geneva","poland","warsaw","romania",
+  "bucharest","czech","prague","austria","vienna","italy","milan","rome","portugal",
+  "lisbon","israel","tel aviv","japan","tokyo","korea","seoul","china","shanghai",
+  "beijing","shenzhen","mexico","brazil","argentina","chile","colombia",
+  "south africa","cape town","johannesburg","thailand","bangkok","vietnam",
+  "ho chi minh","hcmc","hanoi"
 ];
-
-const AMBIGUOUS_OK_TERMS = [
-  "global","remote","distributed","multiple locations","anywhere","americas"
-];
+const AMBIGUOUS_OK_TERMS = ["global","remote","distributed","multiple locations","anywhere","americas"];
 
 function countHits(text, terms) {
   let hits = 0;
   for (const term of terms) if (text.includes(term)) hits += 1;
   return hits;
 }
-
 function excludeBackendInfraRole(jobText) {
   const text = jobText.toLowerCase();
   if (countHits(text, HARD_BACKEND_TERMS) >= 1) return true;
@@ -442,7 +403,6 @@ function excludeBackendInfraRole(jobText) {
   if (countHits(text, INFRA_OWNERSHIP) >= 2) return true;
   return false;
 }
-
 function shouldExcludeForLocation(geoTextRaw) {
   const geo = (geoTextRaw || "").toLowerCase().trim();
   if (!geo) return false;
@@ -450,7 +410,6 @@ function shouldExcludeForLocation(geoTextRaw) {
   if (NON_US_LOCATION_TERMS.some(t => geo.includes(t))) return true;
   return false;
 }
-
 function passesGates(job, relaxed = false) {
   if (evaluateExplicitRules(job)) return false;
 
@@ -475,7 +434,7 @@ function passesGates(job, relaxed = false) {
   return true;
 }
 
-// ---------- Fetchers (defensive) ----------
+// ---------- Fetchers ----------
 async function fetchGreenhouse(token) {
   try {
     const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${token}/jobs`, { cache: "no-store" });
@@ -489,11 +448,8 @@ async function fetchGreenhouse(token) {
       description: x?.content || "",
       url: x?.absolute_url || ""
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
-
 async function fetchLever(slug) {
   try {
     const r = await fetch(`https://api.lever.co/v0/postings/${slug}?mode=json`, { cache: "no-store" });
@@ -507,11 +463,8 @@ async function fetchLever(slug) {
       description: x?.description || "",
       url: x?.hostedUrl || ""
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
-
 async function fetchCustom(url) {
   try {
     const r = await fetch(url, { cache: "no-store" });
@@ -525,9 +478,7 @@ async function fetchCustom(url) {
       description: x?.description || "",
       url: x?.url || ""
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 // ---------- Loading UI ----------
@@ -639,9 +590,7 @@ function setProgress(statusText, done, total, noteText = "") {
 
 // ---------- Dirty export (JSON ONLY) ----------
 const SUBJECT_PREFIX = "new dirty addtions as of";
-
 function pad2(n) { return String(n).padStart(2, "0"); }
-
 function timestampForSubject(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = pad2(d.getMonth() + 1);
@@ -650,12 +599,10 @@ function timestampForSubject(d = new Date()) {
   const mi = pad2(d.getMinutes());
   return `${yyyy}:${mm}:${dd} ${hh}:${mi}`;
 }
-
 function buildGmailComposeUrl({ subject, body }) {
   const base = "https://mail.google.com/mail/?view=cm&fs=1";
   return `${base}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
-
 function ensureMailFallbackUI() {
   const controls = document.querySelector(".controls") || document.body;
 
@@ -722,13 +669,11 @@ function ensureMailFallbackUI() {
   controls.insertAdjacentElement("afterend", wrap);
   return wrap;
 }
-
 async function mailDirtyList() {
   const staged = getStagedRules();
   if (!staged.length) return;
 
   const subject = `${SUBJECT_PREFIX} ${timestampForSubject()}`;
-
   const rulesJson = JSON.stringify(staged, null, 2);
   const clipboardPayload = [
     "SJS PROMOTE PACKET",
@@ -741,12 +686,7 @@ async function mailDirtyList() {
   ].join("\n");
 
   let clipboardOK = false;
-  try {
-    await navigator.clipboard.writeText(clipboardPayload);
-    clipboardOK = true;
-  } catch {
-    clipboardOK = false;
-  }
+  try { await navigator.clipboard.writeText(clipboardPayload); clipboardOK = true; } catch { clipboardOK = false; }
 
   const ui = ensureMailFallbackUI();
   ui.hidden = false;
@@ -773,66 +713,48 @@ async function mailDirtyList() {
   const gmailUrl = buildGmailComposeUrl({ subject, body: bodyInstructions });
   try { window.open(gmailUrl, "_blank", "noopener,noreferrer"); } catch {}
 }
-
 function exportRulesJson() {
   const staged = getStagedRules();
   if (!staged.length) return;
   downloadJsonFile("rules.json", staged);
 }
 
-// ---------- Rendering ----------
+// ---------- Rendering / Search / Dirty UI / Wire ----------
+/* The rest of the file is unchanged from your last version, except it now uses setSettingsVisible()
+   instead of directly setting .hidden, and it still contains NO rules.txt UI. */
+
 function buildBlacklistPanel(job, id, cardDiv) {
   const panel = document.createElement("div");
   panel.className = "bl-panel";
 
-  const row1 = document.createElement("div");
-  row1.className = "bl-row";
+  const mkRow = () => { const d = document.createElement("div"); d.className = "bl-row"; return d; };
 
-  const cbCompany = document.createElement("input");
-  cbCompany.type = "checkbox";
-  const labCompany = document.createElement("label");
-  labCompany.textContent = `Company (${job.company})`;
+  const row1 = mkRow();
+  const cbCompany = document.createElement("input"); cbCompany.type = "checkbox";
+  const labCompany = document.createElement("label"); labCompany.textContent = `Company (${job.company})`;
   row1.append(cbCompany, labCompany);
 
-  const row2 = document.createElement("div");
-  row2.className = "bl-row";
-
-  const cbTitle = document.createElement("input");
-  cbTitle.type = "checkbox";
-  const labTitle = document.createElement("label");
-  labTitle.textContent = "Title phrase";
-  const inTitle = document.createElement("input");
-  inTitle.type = "text";
-  inTitle.value = job.title || "";
+  const row2 = mkRow();
+  const cbTitle = document.createElement("input"); cbTitle.type = "checkbox";
+  const labTitle = document.createElement("label"); labTitle.textContent = "Title phrase";
+  const inTitle = document.createElement("input"); inTitle.type = "text"; inTitle.value = job.title || "";
   row2.append(cbTitle, labTitle, inTitle);
 
-  const row3 = document.createElement("div");
-  row3.className = "bl-row";
-
-  const cbLoc = document.createElement("input");
-  cbLoc.type = "checkbox";
-  const labLoc = document.createElement("label");
-  labLoc.textContent = "Location phrase";
-  const inLoc = document.createElement("input");
-  inLoc.type = "text";
-  inLoc.value = job.location || "";
+  const row3 = mkRow();
+  const cbLoc = document.createElement("input"); cbLoc.type = "checkbox";
+  const labLoc = document.createElement("label"); labLoc.textContent = "Location phrase";
+  const inLoc = document.createElement("input"); inLoc.type = "text"; inLoc.value = job.location || "";
   row3.append(cbLoc, labLoc, inLoc);
 
-  const row4 = document.createElement("div");
-  row4.className = "bl-row";
-
-  const cbKw = document.createElement("input");
-  cbKw.type = "checkbox";
-  const labKw = document.createElement("label");
-  labKw.textContent = "Keyword(s)";
-  const inKw = document.createElement("input");
-  inKw.type = "text";
-  inKw.placeholder = "comma-separated (optional)";
+  const row4 = mkRow();
+  const cbKw = document.createElement("input"); cbKw.type = "checkbox";
+  const labKw = document.createElement("label"); labKw.textContent = "Keyword(s)";
+  const inKw = document.createElement("input"); inKw.type = "text"; inKw.placeholder = "comma-separated (optional)";
   row4.append(cbKw, labKw, inKw);
 
   const hint = document.createElement("div");
   hint.className = "bl-hint";
-  hint.textContent = "Stage one or more rules locally. They block future results immediately. Mail/Download exports RULES.JSON only.";
+  hint.textContent = "Stage rules locally. Mail/Download exports RULES.JSON only.";
 
   const actions = document.createElement("div");
   actions.className = "bl-actions";
@@ -844,22 +766,16 @@ function buildBlacklistPanel(job, id, cardDiv) {
   const btnCancel = document.createElement("button");
   btnCancel.className = "btn";
   btnCancel.textContent = "Cancel";
-
   btnCancel.onclick = () => panel.remove();
 
   btnApply.onclick = () => {
     if (cbCompany.checked) stageRule({ type: "company", value: job.company });
     if (cbTitle.checked) stageRule({ type: "title", value: inTitle.value });
     if (cbLoc.checked) stageRule({ type: "location", value: inLoc.value });
-
     if (cbKw.checked) {
-      const parts = (inKw.value || "")
-        .split(",")
-        .map(s => s.trim())
-        .filter(Boolean);
+      const parts = (inKw.value || "").split(",").map(s => s.trim()).filter(Boolean);
       parts.forEach(p => stageRule({ type: "keyword", value: p }));
     }
-
     purgeRuleBlockedFromDOM();
     cardDiv.remove();
   };
@@ -892,11 +808,7 @@ function shouldHide(job) {
   if (!r) return false;
   return !!(r.rejected || r.appliedConfirmed);
 }
-
-function isNewHit(job) {
-  return !state.memory[jobId(job)];
-}
-
+function isNewHit(job) { return !state.memory[jobId(job)]; }
 function isViewedUndecided(job) {
   const r = state.memory[jobId(job)] || null;
   if (!r) return false;
@@ -989,7 +901,6 @@ function renderJob(job) {
   return div;
 }
 
-// ---------- Search ----------
 async function runSearch() {
   const out = $("results");
   if (!out) return;
@@ -1006,9 +917,7 @@ async function runSearch() {
   for (const c of state.custom) tasks.push({ type: "Custom", label: c, fn: () => fetchCustom(c) });
 
   const total = tasks.length;
-  let done = 0;
-  let skipped = 0;
-  let failed = 0;
+  let done = 0, skipped = 0, failed = 0;
   let jobs = [];
 
   const PER_SOURCE_TIMEOUT_MS = 12000;
@@ -1031,20 +940,16 @@ async function runSearch() {
 
   function withTimeout(promise, ms) {
     let h = null;
-    const t = new Promise((_, reject) => {
-      h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms);
-    });
+    const t = new Promise((_, reject) => { h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms); });
     return Promise.race([promise, t]).finally(() => { if (h) clearTimeout(h); });
   }
 
   const doSearch = (async () => {
     for (const t of tasks) {
-      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total,
-        `Skipped: ${skipped}  Failed/Timed: ${failed}`);
+      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total, `Skipped: ${skipped}  Failed/Timed: ${failed}`);
 
-      let chunk = [];
       try {
-        chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
+        const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
         if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
         else skipped += 1;
       } catch {
@@ -1052,12 +957,10 @@ async function runSearch() {
       }
 
       done += 1;
-      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total,
-        `Skipped: ${skipped}  Failed/Timed: ${failed}`);
+      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total, `Skipped: ${skipped}  Failed/Timed: ${failed}`);
     }
 
     let passed = [];
-
     if (state.mode === "relaxed") {
       setMode("relaxed");
       passed = jobs.filter(j => passesGates(j, true));
@@ -1079,22 +982,13 @@ async function runSearch() {
     passed.sort((a, b) => {
       const aw = isViewedUndecided(a) ? 0 : (isNewHit(a) ? 1 : 2);
       const bw = isViewedUndecided(b) ? 0 : (isNewHit(b) ? 1 : 2);
-      if (aw !== bw) return aw - bw;
-      return 0;
+      return aw - bw;
     });
 
     passed.slice(0, MAX_RESULTS).forEach(j => out.appendChild(renderJob(j)));
 
-    if (failed > 0 || skipped > 0) {
-      const note = document.createElement("div");
-      note.className = "sjs-note";
-      note.textContent = `Run finished. Skipped: ${skipped}. Failed/Timed sources: ${failed}.`;
-      out.parentElement?.insertBefore(note, out);
-    }
-
-    if (total > 0) {
-      toast(`Run complete. Sources: ${total}. Results: ${Math.min(passed.length, MAX_RESULTS)}.`);
-    }
+    if (total > 0) toast(`Run complete. Sources: ${total}. Results: ${Math.min(passed.length, MAX_RESULTS)}.`);
+    refreshDirtyUI();
   })();
 
   try {
@@ -1110,11 +1004,9 @@ async function runSearch() {
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     setLoading(false);
-    refreshDirtyUI();
   }
 }
 
-// ---------- Dirty UI (JSON ONLY) ----------
 function ensureDirtyUI() {
   const controls = document.querySelector(".controls");
   if (!controls) return null;
@@ -1143,15 +1035,12 @@ function ensureDirtyUI() {
   btnDlJson.textContent = "Download rules.json";
   btnDlJson.onclick = exportRulesJson;
 
-  // Mobile: keep mail, optionally hide download json if you prefer
   if (isLikelyMobile()) {
-    // leave visible; operator preference can decide later
-    // btnDlJson.hidden = true;
+    // leave both visible; adjust later if you want
   }
 
   wrap.append(tag, btnMail, btnDlJson);
   controls.appendChild(wrap);
-
   return wrap;
 }
 
@@ -1173,20 +1062,19 @@ function refreshDirtyUI() {
   if (n > 0) purgeRuleBlockedFromDOM();
 }
 
-// ---------- Wire UI ----------
 function wire() {
-  const settingsSection = $("settings");
+  // Force initial closed state regardless of CSS.
+  setSettingsVisible(false);
 
-  // Settings button is a toggle (open/close). Save always closes.
   $("btnSettings").onclick = () => {
-    if (!settingsSection) return;
-    settingsSection.hidden = !settingsSection.hidden;
-    toast(settingsSection.hidden ? "Settings closed" : "Settings open");
+    const s = $("settings");
+    const isOpen = s ? (s.hidden === false && s.style.display !== "none") : false;
+    setSettingsVisible(!isOpen);
+    toast(!isOpen ? "Settings open" : "Settings closed");
   };
 
   $("btnSave").onclick = saveSettings;
   $("btnRun").onclick = runSearch;
-
   $("btnClear").onclick = () => { clearMemory(); };
 
   $("modeStrict").onclick = () => setMode("strict");

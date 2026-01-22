@@ -1,9 +1,3 @@
-/* Strict Job Search — v3.2.01.21.26
-   Visual semantics:
-   - Blue = mode state (Strict/Relaxed)
-   - Teal = local/staged/dirty (transient)
-*/
-
 /* =========================
    RESET / BASE
    ========================= */
@@ -29,41 +23,29 @@ section { margin-bottom: 22px; }
 h2 { margin: 18px 0 10px; }
 
 /* =========================
-   TOKENS
-   ========================= */
-:root{
-  --sjs-blue: #3fa9f5;          /* gradient blue */
-  --sjs-teal: #4ddbb1;          /* gradient teal */
-  --sjs-teal-solid: #2dd4bf;    /* dirty teal */
-  --sjs-danger: #dc2626;
-
-  --sjs-btn-h: 32px;
-  --sjs-btn-r: 999px;
-
-  --card-bg: rgba(255,255,255,0.06);
-  --card-br: rgba(255,255,255,0.10);
-  --card-shadow: 0 14px 30px rgba(0,0,0,0.22);
-}
-
-/* =========================
    HEADER / BRAND
    ========================= */
-.header{
-  padding: 18px 16px 6px;
+.topbar { padding: 18px 16px 6px; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 
-.header-left h1{
+.brandText h1 {
   margin: 0;
   font-size: 1.9rem;
   letter-spacing: 0.2px;
 }
 
-.subtitle{
+.brandText p {
   margin: 6px 0 0;
   opacity: 0.86;
 }
 
-.appIcon{
+.brandIcon {
   width: 54px;
   height: 54px;
   border-radius: 14px;
@@ -73,33 +55,54 @@ h2 { margin: 18px 0 10px; }
 }
 
 /* =========================
+   REMOVE BANNER COMPLETELY
+   ========================= */
+.banner { display: none !important; }
+
+/* =========================
    CONTROLS
    ========================= */
-.controls{
+.controls {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   padding: 14px;
   border-radius: 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-br);
-  box-shadow: var(--card-shadow);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.22);
 }
 
 /* Supports both naming styles */
 .modes,
-.modeToggle{
+.modeToggle {
   display: flex;
   gap: 8px;
   margin-left: auto;
 }
 
 /* =========================
-   BUTTON BASE
+   BUTTONS (AUTHORITATIVE)
    ========================= */
+:root{
+  --sjs-blue: #3fa9f5;          /* gradient blue */
+  --sjs-teal: #4ddbb1;          /* gradient teal */
+  --sjs-teal-solid: #2dd4bf;    /* dirty teal */
+
+  --sjs-mode-fill: #e8f0ff;     /* mode fill */
+  --sjs-mode-border: rgba(63,169,245,0.45);
+  --sjs-mode-active-border: #4ddbb1;
+
+  --sjs-danger: #dc2626;
+
+  --sjs-btn-h: 32px;
+  --sjs-btn-r: 999px;
+}
+
+/* Global base for ALL buttons */
 button,
-.btn{
+.btn {
   min-height: var(--sjs-btn-h);
   border-radius: var(--sjs-btn-r);
   padding: 8px 14px;
@@ -114,145 +117,119 @@ button,
 }
 
 button:hover,
-.btn:hover{ filter: brightness(1.03); }
+.btn:hover { filter: brightness(1.03); }
 
 button:active,
-.btn:active{ transform: translateY(1px); }
+.btn:active { transform: translateY(1px); }
 
 /* Primary actions */
 #btnRun,
 #btnSettings,
-#btnSave,
-.btn.primary{
+.btn.primary {
   background: linear-gradient(135deg, var(--sjs-blue), var(--sjs-teal));
-  color: #000000;
+  color: rgba(0,30,30,0.95);
   border: 1px solid rgba(0,0,0,0.10);
   font-weight: 650;
 }
 
 /* Destructive */
 #btnClear,
-.btn.danger{
+.btn.danger {
   background: var(--sjs-danger);
   color: #ffffff;
   border: 1px solid rgba(0,0,0,0.18);
   font-weight: 650;
 }
 
-/* =========================
-   MODE BUTTONS (STRICT / RELAXED)
-   Blue fill, black text. Active via border/glow.
-   ========================= */
-.modes button,
+/* Mode buttons: container-based so IDs/classes don’t matter */
 .modeToggle button,
-#modeStrict,
-#modeRelaxed{
-  background: linear-gradient(135deg, #60a5fa, var(--sjs-blue)) !important;
-  color: #000000 !important;
-  border: 2px solid rgba(0,0,0,0.22) !important;
-  font-weight: 700 !important;
-  box-shadow: 0 8px 16px rgba(0,0,0,0.18) !important;
+.modes button {
+  background: var(--sjs-mode-fill) !important;
+  color: rgba(10,45,120,0.95) !important;
+  border: 2px solid var(--sjs-mode-border) !important;
+  font-weight: 650;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.16);
 }
 
-.modes button.active,
+/* Active mode (glowing teal border) */
 .modeToggle button.active,
-#modeStrict.active,
-#modeRelaxed.active{
-  border-color: #000000 !important;
+.modes button.active {
+  border: 2px solid var(--sjs-mode-active-border) !important;
   box-shadow:
-    0 0 0 1px #000000,
-    0 10px 20px rgba(0,0,0,0.24) !important;
+    0 0 0 2px rgba(77,219,177,0.95),
+    0 0 14px rgba(77,219,177,0.65),
+    0 0 28px rgba(77,219,177,0.35),
+    0 8px 16px rgba(0,0,0,0.16) !important;
 }
 
-/* =========================
-   DIRTY CLUSTER (TEAL)
-   app.js creates: .sjs-dirtywrap .sjs-dirtytag .sjs-dirtybtn
-   ========================= */
-.sjs-dirtywrap{
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
+/* Remove default focus ring that can look like a black border */
+.modeToggle button:focus,
+.modes button:focus {
+  outline: none !important;
 }
 
+/* Dirty cluster */
 .sjs-dirtytag,
 .sjs-dirtybtn{
   min-height: var(--sjs-btn-h);
   border-radius: var(--sjs-btn-r);
-  background: var(--sjs-teal-solid) !important;
-  color: #000000 !important;
-  border: none !important;
+  background: var(--sjs-teal-solid);
+  color: rgba(15,15,18,0.92);
+  border: none;
   box-shadow: 0 8px 16px rgba(0,0,0,0.18);
-  font-weight: 700;
 }
 
 .sjs-dirtybtn{
   padding: 8px 14px;
   font-size: 0.92rem;
   cursor: pointer;
+  font-weight: 650;
 }
 
-.sjs-dirtybtn:hover{ filter: brightness(1.03); }
-.sjs-dirtybtn:active{ transform: translateY(1px); }
+.sjs-dirtybtn:hover { filter: brightness(1.03); }
+.sjs-dirtybtn:active { transform: translateY(1px); }
 
 /* =========================
-   SETTINGS (VERTICAL, CARD PER FIELD)
+   SETTINGS
    ========================= */
-#settings{
-  display: block;
+#settings {
   padding: 14px;
   border-radius: 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-br);
-  box-shadow: var(--card-shadow);
-}
-
-#settings h2{
-  margin: 8px 0 14px;
-}
-
-#settings label{
-  display: block;
-  width: 100%;
-  margin: 0 0 12px;
-  padding: 12px 12px 10px;
-  border-radius: 14px;
-  background: rgba(0,0,0,0.16);
+  background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.10);
-  font-weight: 700;
-  font-size: 0.95rem;
-  opacity: 1;
 }
 
-#settings textarea{
+label {
   display: block;
+  margin: 10px 0 6px;
+  opacity: 0.92;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+textarea {
   width: 100%;
-  margin: 10px 0 0;
   border-radius: 12px;
   padding: 10px 12px;
+  margin-bottom: 10px;
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(250,250,255,0.92);
   color: rgba(15,15,18,0.92);
 }
 
-/* Save button under cards */
-#btnSave{
-  display: inline-block;
-  margin-top: 6px;
-}
-
 /* =========================
-   LOADING UI (ANIMATED)
+   LOADING UI
    ========================= */
-.sjs-statuswrap{
+.sjs-statuswrap {
   margin: 10px 4px 0 4px;
   display: flex;
   align-items: center;
   gap: 10px;
   opacity: 0.95;
-  font-weight: 700;
+  font-weight: 650;
 }
 
-.sjs-progress{
+.sjs-progress {
   margin: 10px 4px 0 4px;
   height: 8px;
   border-radius: 999px;
@@ -261,7 +238,7 @@ button:active,
   border: 1px solid rgba(255,255,255,0.12);
 }
 
-.sjs-progress > div{
+.sjs-progress > div {
   height: 100%;
   width: 0%;
   border-radius: 999px;
@@ -277,35 +254,27 @@ button:active,
   box-shadow: 0 0 18px rgba(77,219,177,0.35);
 }
 
-@keyframes sjsGradientShift{
-  0%{ background-position: 0% 50%; }
-  100%{ background-position: 220% 50%; }
+@keyframes sjsGradientShift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 220% 50%; }
 }
 
-.sjs-note{
+.sjs-note {
   margin: 8px 4px 0 4px;
   opacity: 0.78;
   font-size: 12px;
 }
 
-.sjs-error{
-  margin-top: 10px;
-  padding: 12px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(0,0,0,0.26);
-}
-
 /* =========================
    RESULTS / JOB CARDS
    ========================= */
-#results{
+#results {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.job{
+.job {
   background: rgba(255,255,255,0.07);
   border-radius: 18px;
   padding: 14px 14px 12px;
@@ -313,46 +282,57 @@ button:active,
   box-shadow: 0 14px 34px rgba(0,0,0,0.22);
 }
 
-.job h3{
+.job h3 {
   margin: 0 0 6px;
   letter-spacing: 0.2px;
 }
 
-.job p{
+.job p {
   margin: 0;
   opacity: 0.88;
 }
 
-/* Muted states */
 .job.viewed,
 .job.rejected,
-.job.appliedConfirmed{
+.job.appliedConfirmed {
   border-color: rgba(77,219,177,0.25);
 }
 
-.job.viewed:not(.rejected):not(.appliedConfirmed){
+.job.viewed:not(.rejected):not(.appliedConfirmed) {
   background: rgba(0,0,0,0.10);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
 
 .job.rejected,
-.job.appliedConfirmed{
+.job.appliedConfirmed {
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(0,0,0,0.20);
 }
 
-.job.rejected h3{
+.job.rejected h3 {
   color: rgba(200,200,205,0.78);
   text-decoration: line-through;
 }
 
-.job.rejected p{
+.job.rejected p {
   color: rgba(200,200,205,0.70);
   text-decoration: line-through;
 }
 
-/* Actions */
-.actions{
+.job.appliedConfirmed h3 {
+  color: rgba(210,210,214,0.82);
+  text-decoration: none;
+}
+
+.job.appliedConfirmed p {
+  color: rgba(210,210,214,0.72);
+  text-decoration: none;
+}
+
+/* =========================
+   ACTIONS
+   ========================= */
+.actions {
   display: flex;
   gap: 10px;
   margin-top: 12px;
@@ -361,21 +341,23 @@ button:active,
 }
 
 .job.rejected .btn,
-.job.appliedConfirmed .btn{
+.job.appliedConfirmed .btn {
   background: rgba(0,0,0,0.28);
   color: rgba(245,245,250,0.92);
   border: 1px solid rgba(255,255,255,0.16);
   box-shadow: none;
 }
 
-.job.rejected .btn.touched{
+.job.rejected .btn.touched {
   background: rgba(120,0,0,0.42);
   border-color: rgba(255,90,90,0.55);
   color: rgba(255,210,210,0.95);
 }
 
-/* Applied confirmation */
-.appliedWrap{
+/* =========================
+   APPLIED CONFIRMATION
+   ========================= */
+.appliedWrap {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -385,29 +367,31 @@ button:active,
   background: rgba(255,255,255,0.06);
 }
 
-.appliedWrap input{
+.appliedWrap input {
   width: 16px;
   height: 16px;
   cursor: pointer;
   pointer-events: auto;
 }
 
-.appliedWrap label{
+.appliedWrap label {
   margin: 0;
   font-weight: 700;
   font-size: 0.95rem;
   color: rgba(235,235,240,0.78);
 }
 
-.appliedWrap.checked label{
+.appliedWrap.checked label {
   color: rgba(190,255,120,0.95);
   text-shadow: 0 0 10px rgba(190,255,120,0.18);
 }
 
-/* Responsive */
-@media (max-width: 640px){
-  .header-left h1{ font-size: 1.55rem; }
-  .appIcon{ width: 48px; height: 48px; border-radius: 12px; }
-  .controls{ padding: 12px; }
-  .modes, .modeToggle{ margin-left: 0; }
+/* =========================
+   RESPONSIVE
+   ========================= */
+@media (max-width: 640px) {
+  .brandText h1 { font-size: 1.55rem; }
+  .brandIcon { width: 48px; height: 48px; border-radius: 12px; }
+  .controls { padding: 12px; }
+  .modes, .modeToggle { margin-left: 0; }
 }

@@ -1,3 +1,4 @@
+// app.js — Strict Job Search v3.x
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -263,7 +264,6 @@ function purgeRuleBlockedFromDOM() {
     .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
     .sjs-dirtywrap{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto; }
 
-    /* Dirty grouping: teal family, fixed height, black text */
     .sjs-dirtytag{
       display:inline-flex;
       align-items:center;
@@ -301,14 +301,6 @@ function purgeRuleBlockedFromDOM() {
       filter:none;
     }
 
-    #sjsMailFallback textarea{ box-sizing:border-box; }
-    #sjsFallbackPayload{
-      white-space:pre;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size:12px;
-      line-height:1.35;
-    }
-
     .sjs-toast{
       position:fixed;
       left:50%;
@@ -335,31 +327,35 @@ function purgeRuleBlockedFromDOM() {
 })();
 
 // ---------- Settings ----------
+function parseLines(val) {
+  return String(val || "")
+    .split(/\n+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 function loadSettings() {
   state.greenhouse = JSON.parse(localStorage.getItem("greenhouse") || "[]");
   state.lever = JSON.parse(localStorage.getItem("lever") || "[]");
   state.custom = JSON.parse(localStorage.getItem("custom") || "[]");
 
-  // First-run seed: if no sources are saved, preload the authoritative slug stack.
-  if (!state.greenhouse.length && !state.lever.length && !state.custom.length) {
-    state.greenhouse = ["appliedintuition", "orcasecurity", "aidashinc", "udacity", "hubspotjobs", "corelight", "fortra", "thymecare", "yieldmo", "fortune", "voxmedia", "glassdoor", "credera", "datadog", "securityscorecard", "affinity", "netflix", "spotify", "openai", "airbnb", "stripe", "square", "block", "asana", "atlassian", "snowflake", "mongodb", "elastic", "splunk", "cloudflare", "okta", "palantir", "zendesk", "twilio", "salesforce", "servicenow", "workday", "linkedin", "microsoft", "google", "apple"];
-  }
-
-  $("greenhouse").value = state.greenhouse.join("\n");
-  $("lever").value = state.lever.join("\n");
-  $("custom").value = state.custom.join("\n");
+  if ($("greenhouse")) $("greenhouse").value = state.greenhouse.join("\n");
+  if ($("lever")) $("lever").value = state.lever.join("\n");
+  if ($("custom")) $("custom").value = state.custom.join("\n");
 }
 
 function saveSettings() {
-  state.greenhouse = $("greenhouse").value.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  state.lever = $("lever").value.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  state.custom = $("custom").value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  state.greenhouse = parseLines($("greenhouse")?.value);
+  state.lever = parseLines($("lever")?.value);
+  state.custom = parseLines($("custom")?.value);
 
   localStorage.setItem("greenhouse", JSON.stringify(state.greenhouse));
   localStorage.setItem("lever", JSON.stringify(state.lever));
   localStorage.setItem("custom", JSON.stringify(state.custom));
 
-  $("settings").hidden = true;
+  if ($("settings")) $("settings").hidden = true;
+
+  toast(`Saved (Greenhouse: ${state.greenhouse.length}, Lever: ${state.lever.length}, Custom: ${state.custom.length})`);
 }
 
 // ---------- Mode ----------
@@ -677,7 +673,6 @@ function timestampForSubject(d = new Date()) {
 
 function buildGmailComposeUrl({ subject, body }) {
   const base = "https://mail.google.com/mail/?view=cm&fs=1";
-  // Intentionally omit "to=" so recipient is always manual.
   return `${base}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
@@ -752,6 +747,27 @@ function ensureMailFallbackUI() {
   btnDlJson.className = "btn sjs-dirtybtn";
   btnDlJson.textContent = "Download rules.json";
 
+  const btnDlTxt = document.createElement("button");
+  btnDlTxt.className = "btn sjs-dirtybtn";
+  btnDlTxt.textContent = "Download rules.txt";
+
+  const btnHide = document.createElement("button");
+  btnHide.className = "btn";
+  btnHide.textContent = "Hide";
+  btnHide.onclick = () => (wrap.hidden = true);
+
+  btnCopyPayload.onclick = async () => {
+    try { await navigator.clipboard.writeText(payload.value || ""); } catch {}
+  };
+
+  btnDlJson.onclick = () => {
+    try {
+      const staged = getStagedRules();
+      downloadJsonFile("rules.json", staged);
+    } catch {}
+  };
+
+  btnDlTxt.onclick = () => {
     try {
       const staged = getStagedRules();
       downloadTextFile("rules.txt", rulesTxtFromRules(staged));
@@ -1127,6 +1143,11 @@ async function runSearch() {
       note.textContent = `Run finished. Skipped: ${skipped}. Failed/Timed sources: ${failed}.`;
       out.parentElement?.insertBefore(note, out);
     }
+
+    // Give the operator a clear outcome line
+    if (total > 0) {
+      toast(`Run complete. Sources: ${total}. Results: ${Math.min(passed.length, MAX_RESULTS)}.`);
+    }
   })();
 
   try {
@@ -1134,8 +1155,10 @@ async function runSearch() {
   } catch (err) {
     if (String(err?.message || err) === "TIMEOUT" || timedOut) {
       out.innerHTML = `<div class="sjs-error"><strong>Timed out</strong><div>Search exceeded 3 minutes. Start a new search.</div></div>`;
+      toast("Timed out (3 minutes)");
     } else {
       out.innerHTML = `<div class="sjs-error"><strong>Search error</strong><div>${String(err)}</div></div>`;
+      toast("Search error");
     }
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -1173,12 +1196,18 @@ function ensureDirtyUI() {
   btnDlJson.textContent = "Download rules.json";
   btnDlJson.onclick = exportRulesJson;
 
+  const btnDlTxt = document.createElement("button");
+  btnDlTxt.id = "btnDlRulesTxt";
+  btnDlTxt.className = "btn sjs-dirtybtn";
+  btnDlTxt.textContent = "Download rules.txt";
+  btnDlTxt.onclick = exportRulesTxt;
 
   if (isLikelyMobile()) {
     btnDlJson.hidden = true;
+    btnDlTxt.hidden = true;
   }
 
-  wrap.append(tag, btnMail, btnDlJson);
+  wrap.append(tag, btnMail, btnDlJson, btnDlTxt);
   controls.appendChild(wrap);
 
   return wrap;
@@ -1191,6 +1220,7 @@ function refreshDirtyUI() {
   const tag = document.getElementById("sjsDirtyTag");
   const btnMail = document.getElementById("btnMailDirty");
   const btnJ = document.getElementById("btnDlRulesJson");
+  const btnT = document.getElementById("btnDlRulesTxt");
 
   const n = getStagedRules().length;
   if (tag) tag.textContent = `Dirty: ${n}`;
@@ -1198,13 +1228,22 @@ function refreshDirtyUI() {
   const disabled = n === 0;
   if (btnMail) btnMail.disabled = disabled;
   if (btnJ) btnJ.disabled = disabled;
+  if (btnT) btnT.disabled = disabled;
 
   if (n > 0) purgeRuleBlockedFromDOM();
 }
 
 // ---------- Wire UI ----------
 function wire() {
-  $("btnSettings").onclick = () => ($("settings").hidden = false);
+  const settingsSection = $("settings");
+
+  // Toggle settings panel
+  $("btnSettings").onclick = () => {
+    if (!settingsSection) return;
+    settingsSection.hidden = !settingsSection.hidden;
+    toast(settingsSection.hidden ? "Settings closed" : "Settings open");
+  };
+
   $("btnSave").onclick = saveSettings;
   $("btnRun").onclick = runSearch;
 

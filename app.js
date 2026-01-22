@@ -1,4 +1,6 @@
-// app.js — Strict Job Search v3.x
+// app.js — Strict Job Search v3.2 (repo-ready)
+// FINAL: removes rules.txt everywhere, restores Save-closes-panel behavior, keeps dirty stack (json only)
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -14,7 +16,7 @@ const MAX_RESULTS = 15;
 const MEMORY_KEY = "jobMemoryV3";
 const TIMEOUT_MS = 180000; // 3 minutes
 
-// Staged (dirty) rules persistence (works even if index.js is absent/broken)
+// Volatile staged rules (dirty list)
 const STAGED_RULES_KEY = "sjs_staged_rules_v1";
 
 // ---------- Utilities ----------
@@ -50,16 +52,12 @@ function saveMemory() {
 }
 
 async function clearMemory() {
-  // Semantics: "Delete memory" = clear all device-local persistence for this app.
-  // This includes sources, staged rules (dirty count), and job memory state.
-
-  // 1) localStorage sweep: known keys + any sjs_* namespace
   const explicitKeys = new Set([
-    MEMORY_KEY,         // "jobMemoryV3"
+    MEMORY_KEY,
     "greenhouse",
     "lever",
     "custom",
-    STAGED_RULES_KEY    // "sjs_staged_rules_v1"
+    STAGED_RULES_KEY
   ]);
 
   try {
@@ -72,10 +70,8 @@ async function clearMemory() {
     }
   } catch {}
 
-  // 2) sessionStorage (defensive)
   try { sessionStorage.clear(); } catch {}
 
-  // 3) Cache Storage (defensive)
   try {
     if ("caches" in window && window.caches?.keys) {
       const names = await window.caches.keys();
@@ -85,7 +81,6 @@ async function clearMemory() {
     }
   } catch {}
 
-  // 4) Service workers (defensive)
   try {
     if ("serviceWorker" in navigator && navigator.serviceWorker?.getRegistrations) {
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -95,14 +90,12 @@ async function clearMemory() {
     }
   } catch {}
 
-  // Reset runtime state
   state.memory = {};
   state.rendered = {};
   state.greenhouse = [];
   state.lever = [];
   state.custom = [];
 
-  // Reset UI
   if ($("greenhouse")) $("greenhouse").value = "";
   if ($("lever")) $("lever").value = "";
   if ($("custom")) $("custom").value = "";
@@ -118,7 +111,6 @@ async function clearMemory() {
 }
 
 function isLikelyMobile() {
-  // Conservative: treat small screens as mobile even if UA lies.
   const ua = navigator.userAgent || "";
   const coarse = typeof window !== "undefined" && window.matchMedia
     ? window.matchMedia("(pointer: coarse)").matches
@@ -127,10 +119,7 @@ function isLikelyMobile() {
     ? window.matchMedia("(max-width: 820px)").matches
     : false;
 
-  return (
-    /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
-    (coarse && small)
-  );
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (coarse && small);
 }
 
 function downloadTextFile(filename, text) {
@@ -175,9 +164,7 @@ function loadStagedRulesFallback() {
 }
 
 function saveStagedRulesFallback(arr) {
-  try {
-    localStorage.setItem(STAGED_RULES_KEY, JSON.stringify(arr));
-  } catch {}
+  try { localStorage.setItem(STAGED_RULES_KEY, JSON.stringify(arr)); } catch {}
 }
 
 function getStagedRules() {
@@ -200,11 +187,9 @@ function stageRule(rule) {
   );
   if (exists) return;
 
-  // Preferred: index.js contract (if present)
   if (window.APP_ACTIONS?.stageRule && Array.isArray(window.APP_STATE?.stagedRules)) {
     window.APP_ACTIONS.stageRule(normalized);
   } else {
-    // Fallback: stage via localStorage
     const staged = getStagedRules();
     staged.push(normalized);
     saveStagedRulesFallback(staged);
@@ -353,6 +338,7 @@ function saveSettings() {
   localStorage.setItem("lever", JSON.stringify(state.lever));
   localStorage.setItem("custom", JSON.stringify(state.custom));
 
+  // Always close panel on Save (restores v3 behavior)
   if ($("settings")) $("settings").hidden = true;
 
   toast(`Saved (Greenhouse: ${state.greenhouse.length}, Lever: ${state.lever.length}, Custom: ${state.custom.length})`);
@@ -544,7 +530,7 @@ async function fetchCustom(url) {
   }
 }
 
-// ---------- Loading UI (progress only) ----------
+// ---------- Loading UI ----------
 function ensureLoadingUI() {
   let statusWrap = document.getElementById("sjsStatusWrap");
   let progress = document.getElementById("sjsProgress");
@@ -651,14 +637,8 @@ function setProgress(statusText, done, total, noteText = "") {
   ui.note.textContent = noteText;
 }
 
-// ---------- Mail Tube + Artifact Export ----------
+// ---------- Dirty export (JSON ONLY) ----------
 const SUBJECT_PREFIX = "new dirty addtions as of";
-const BODY_INSTRUCTIONS_ONLY = [
-  "OPERATOR STEPS:",
-  "1) Enter recipient email address in the TO: field.",
-  "2) Paste the clipboard payload into this email body (it contains RULES.JSON + RULES.TXT).",
-  "3) Hit send.",
-].join("\n");
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 
@@ -676,34 +656,6 @@ function buildGmailComposeUrl({ subject, body }) {
   return `${base}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function rulesTxtFromRules(rulesArr) {
-  return (rulesArr || [])
-    .map(r => {
-      const t = String(r?.type || "").trim();
-      const v = String(r?.value || "").trim();
-      if (!t || !v) return "";
-      return `${t}:${v}`;
-    })
-    .filter(Boolean)
-    .join("\n") + "\n";
-}
-
-function buildClipboardPayload({ subject, rulesJson, rulesTxt }) {
-  return [
-    "SJS PROMOTE PACKET",
-    `SUBJECT: ${subject}`,
-    "",
-    "==== RULES.JSON BEGIN ====",
-    rulesJson,
-    "==== RULES.JSON END ====",
-    "",
-    "==== RULES.TXT BEGIN ====",
-    rulesTxt,
-    "==== RULES.TXT END ====",
-    ""
-  ].join("\n");
-}
-
 function ensureMailFallbackUI() {
   const controls = document.querySelector(".controls") || document.body;
 
@@ -717,7 +669,7 @@ function ensureMailFallbackUI() {
   const h = document.createElement("div");
   h.id = "sjsMailFallbackHeader";
   h.style.fontWeight = "700";
-  h.textContent = "Mail packet (clipboard first). Gmail opens with Subject + instructions. Paste clipboard payload into Gmail. Send.";
+  h.textContent = "Mail packet (RULES.JSON only). Gmail opens with Subject + instructions. Paste clipboard payload into Gmail.";
 
   const subjLabel = document.createElement("div");
   subjLabel.className = "bl-hint";
@@ -729,7 +681,7 @@ function ensureMailFallbackUI() {
 
   const payloadLabel = document.createElement("div");
   payloadLabel.className = "bl-hint";
-  payloadLabel.textContent = "Clipboard payload (RULES.JSON + RULES.TXT)";
+  payloadLabel.textContent = "Clipboard payload (RULES.JSON)";
 
   const payload = document.createElement("textarea");
   payload.id = "sjsFallbackPayload";
@@ -747,10 +699,6 @@ function ensureMailFallbackUI() {
   btnDlJson.className = "btn sjs-dirtybtn";
   btnDlJson.textContent = "Download rules.json";
 
-  const btnDlTxt = document.createElement("button");
-  btnDlTxt.className = "btn sjs-dirtybtn";
-  btnDlTxt.textContent = "Download rules.txt";
-
   const btnHide = document.createElement("button");
   btnHide.className = "btn";
   btnHide.textContent = "Hide";
@@ -767,14 +715,7 @@ function ensureMailFallbackUI() {
     } catch {}
   };
 
-  btnDlTxt.onclick = () => {
-    try {
-      const staged = getStagedRules();
-      downloadTextFile("rules.txt", rulesTxtFromRules(staged));
-    } catch {}
-  };
-
-  actions.append(btnCopyPayload, btnDlJson, btnDlTxt, btnHide);
+  actions.append(btnCopyPayload, btnDlJson, btnHide);
   wrap.append(h, subjLabel, subj, payloadLabel, payload, actions);
   wrap.hidden = true;
 
@@ -789,8 +730,15 @@ async function mailDirtyList() {
   const subject = `${SUBJECT_PREFIX} ${timestampForSubject()}`;
 
   const rulesJson = JSON.stringify(staged, null, 2);
-  const rulesTxt = rulesTxtFromRules(staged);
-  const clipboardPayload = buildClipboardPayload({ subject, rulesJson, rulesTxt });
+  const clipboardPayload = [
+    "SJS PROMOTE PACKET",
+    `SUBJECT: ${subject}`,
+    "",
+    "==== RULES.JSON BEGIN ====",
+    rulesJson,
+    "==== RULES.JSON END ====",
+    ""
+  ].join("\n");
 
   let clipboardOK = false;
   try {
@@ -806,8 +754,8 @@ async function mailDirtyList() {
   const header = document.getElementById("sjsMailFallbackHeader");
   if (header) {
     header.textContent = clipboardOK
-      ? "Clipboard payload copied. Gmail will open with Subject + instructions only. Paste payload into Gmail body. Enter TO. Send."
-      : "Clipboard blocked. Use Copy payload. Gmail will open with Subject + instructions only. Paste payload into Gmail body. Enter TO. Send.";
+      ? "Clipboard payload copied. Gmail will open with Subject + instructions. Paste payload into Gmail body. Enter TO. Send."
+      : "Clipboard blocked. Use Copy payload. Gmail will open with Subject + instructions. Paste payload into Gmail body. Enter TO. Send.";
   }
 
   const subjEl = document.getElementById("sjsFallbackSubject");
@@ -815,7 +763,14 @@ async function mailDirtyList() {
   if (subjEl) subjEl.value = subject;
   if (payloadEl) payloadEl.value = clipboardPayload;
 
-  const gmailUrl = buildGmailComposeUrl({ subject, body: BODY_INSTRUCTIONS_ONLY });
+  const bodyInstructions = [
+    "OPERATOR STEPS:",
+    "1) Enter recipient email address in the TO: field.",
+    "2) Paste the clipboard payload into this email body (it contains RULES.JSON).",
+    "3) Hit send."
+  ].join("\n");
+
+  const gmailUrl = buildGmailComposeUrl({ subject, body: bodyInstructions });
   try { window.open(gmailUrl, "_blank", "noopener,noreferrer"); } catch {}
 }
 
@@ -823,12 +778,6 @@ function exportRulesJson() {
   const staged = getStagedRules();
   if (!staged.length) return;
   downloadJsonFile("rules.json", staged);
-}
-
-function exportRulesTxt() {
-  const staged = getStagedRules();
-  if (!staged.length) return;
-  downloadTextFile("rules.txt", rulesTxtFromRules(staged));
 }
 
 // ---------- Rendering ----------
@@ -883,7 +832,7 @@ function buildBlacklistPanel(job, id, cardDiv) {
 
   const hint = document.createElement("div");
   hint.className = "bl-hint";
-  hint.textContent = "Select one or more. These stage rules locally and block future results immediately. Use Mail to open Gmail (Subject + instructions) and paste the clipboard payload to send yourself RULES.JSON + RULES.TXT.";
+  hint.textContent = "Stage one or more rules locally. They block future results immediately. Mail/Download exports RULES.JSON only.";
 
   const actions = document.createElement("div");
   actions.className = "bl-actions";
@@ -1029,7 +978,6 @@ function renderJob(job) {
   blBtn.onclick = () => {
     const existing = div.querySelector(".bl-panel");
     if (existing) { existing.remove(); return; }
-
     const panel = buildBlacklistPanel(job, id, div);
     div.appendChild(panel);
   };
@@ -1144,7 +1092,6 @@ async function runSearch() {
       out.parentElement?.insertBefore(note, out);
     }
 
-    // Give the operator a clear outcome line
     if (total > 0) {
       toast(`Run complete. Sources: ${total}. Results: ${Math.min(passed.length, MAX_RESULTS)}.`);
     }
@@ -1167,7 +1114,7 @@ async function runSearch() {
   }
 }
 
-// ---------- Dirty UI ----------
+// ---------- Dirty UI (JSON ONLY) ----------
 function ensureDirtyUI() {
   const controls = document.querySelector(".controls");
   if (!controls) return null;
@@ -1196,18 +1143,13 @@ function ensureDirtyUI() {
   btnDlJson.textContent = "Download rules.json";
   btnDlJson.onclick = exportRulesJson;
 
-  const btnDlTxt = document.createElement("button");
-  btnDlTxt.id = "btnDlRulesTxt";
-  btnDlTxt.className = "btn sjs-dirtybtn";
-  btnDlTxt.textContent = "Download rules.txt";
-  btnDlTxt.onclick = exportRulesTxt;
-
+  // Mobile: keep mail, optionally hide download json if you prefer
   if (isLikelyMobile()) {
-    btnDlJson.hidden = true;
-    btnDlTxt.hidden = true;
+    // leave visible; operator preference can decide later
+    // btnDlJson.hidden = true;
   }
 
-  wrap.append(tag, btnMail, btnDlJson, btnDlTxt);
+  wrap.append(tag, btnMail, btnDlJson);
   controls.appendChild(wrap);
 
   return wrap;
@@ -1220,7 +1162,6 @@ function refreshDirtyUI() {
   const tag = document.getElementById("sjsDirtyTag");
   const btnMail = document.getElementById("btnMailDirty");
   const btnJ = document.getElementById("btnDlRulesJson");
-  const btnT = document.getElementById("btnDlRulesTxt");
 
   const n = getStagedRules().length;
   if (tag) tag.textContent = `Dirty: ${n}`;
@@ -1228,7 +1169,6 @@ function refreshDirtyUI() {
   const disabled = n === 0;
   if (btnMail) btnMail.disabled = disabled;
   if (btnJ) btnJ.disabled = disabled;
-  if (btnT) btnT.disabled = disabled;
 
   if (n > 0) purgeRuleBlockedFromDOM();
 }
@@ -1237,7 +1177,7 @@ function refreshDirtyUI() {
 function wire() {
   const settingsSection = $("settings");
 
-  // Toggle settings panel
+  // Settings button is a toggle (open/close). Save always closes.
   $("btnSettings").onclick = () => {
     if (!settingsSection) return;
     settingsSection.hidden = !settingsSection.hidden;
@@ -1247,7 +1187,6 @@ function wire() {
   $("btnSave").onclick = saveSettings;
   $("btnRun").onclick = runSearch;
 
-  // Now clears all device-local persistence for this app.
   $("btnClear").onclick = () => { clearMemory(); };
 
   $("modeStrict").onclick = () => setMode("strict");

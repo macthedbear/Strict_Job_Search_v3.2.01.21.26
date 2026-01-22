@@ -1,0 +1,101 @@
+{
+  "version": "1",
+  "explicitRules": [
+    {
+      "type": "location",
+      "value": "Canada"
+    },
+    {
+      "type": "location",
+      "value": "United Kingdom"
+    },
+    {
+      "type": "location",
+      "value": "UK"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Netherlands"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Ireland"
+    },
+    {
+      "type": "location",
+      "value": "Remote - United Kingdom"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Colombia"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Germany"
+    },
+    {
+      "type": "location",
+      "value": "Remote - France"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Spain"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Australia"
+    },
+    {
+      "type": "location",
+      "value": "Dublin, Ireland"
+    },
+    {
+      "type": "title",
+      "value": "Account Executive"
+    },
+    {
+      "type": "title",
+      "value": "Account Executive, Corporate - UKI"
+    },
+    {
+      "type": "title",
+      "value": "Senior Software Engineer - Backend Remote Assistance"
+    },
+    {
+      "type": "title",
+      "value": "Product Consultant"
+    },
+    {
+      "type": "title",
+      "value": "AI Subject Matter Experts (Freelance / Remote)"
+    },
+    {
+      "type": "title",
+      "value": "External Contractor - Mentor role for Flying Car and Autonomous Flight Engineer track"
+    },
+    {
+      "type": "title",
+      "value": "External Contractor - Mentor role for Sensor Fusion Engineer track"
+    },
+    {
+      "type": "title",
+      "value": "Nanodegree"
+    },
+    {
+      "type": "title",
+      "value": "Marketer"
+    },
+    {
+      "type": "title",
+      "value": "Associate, Client Success & Strategy"
+    },
+    {
+      "type": "title",
+      "value": "Core Partner Specialist L1"
+    },
+    {
+      "type": "title",
+      "value": "Paid Media"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Strict Job Search</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="Job-ruthless_192.png" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Header layout guard (self-contained, no CSS file edits) -->
+  <style>
+    .header{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header-right{
+      display: flex;
+      align-items: center;
+    }
+
+    .appIcon{
+      width: 52px;
+      height: 52px;
+      object-fit: contain;
+      cursor: help;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header class="header">
+    <div class="header-left">
+      <h1>Strict Job Search</h1>
+      <p class="subtitle">Judgment-first job filtering</p>
+    </div>
+
+    <div class="header-right">
+      <img
+        src="Job-ruthless_192.png"
+        alt="Strict Job Search"
+        class="appIcon"
+        title="v3.2.01.21.26"
+      />
+    </div>
+  </header>
+
+  <div class="controls">
+    <button id="btnRun" class="btn primary">Run Search</button>
+    <button id="btnSettings" class="btn primary">Sources & Settings</button>
+    <button id="btnClear" class="btn danger">Delete Memory</button>
+
+    <div class="modes">
+      <button id="modeStrict" class="btn mode active">Strict</button>
+      <button id="modeRelaxed" class="btn mode">Relaxed</button>
+    </div>
+  </div>
+
+  <section id="settings" hidden>
+    <h2>Sources & Settings</h2>
+
+    <label>
+      Greenhouse slugs
+      <textarea id="greenhouse" rows="4"></textarea>
+    </label>
+
+    <label>
+      Lever slugs
+      <textarea id="lever" rows="4"></textarea>
+    </label>
+
+    <label>
+      Custom ATS feeds
+      <textarea id="custom" rows="4"></textarea>
+    </label>
+
+    <button id="btnSave" class="btn primary">Save</button>
+  </section>
+
+  <main>
+    <div id="results"></div>
+  </main>
+
+  <!-- Script order matters -->
+  <script type="module" src="index.js"></script>
+  <script defer src="app.js"></script>
+
+</body>
+</html>

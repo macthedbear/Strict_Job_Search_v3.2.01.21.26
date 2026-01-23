@@ -1,6 +1,6 @@
 // app.js — Strict Job Search v3.2
-// Adds Why/Info icon with red/yellow/green semantics + inline explanation panel.
-// No dirty threshold gating changes in this version.
+// Fixes: Sources & Settings toggle (was inverted), adds Copy rules.json to clipboard.
+// Keeps: WhyInfo red/yellow/green semantics + inline Why panel. No dirty-threshold gating changes.
 
 const $ = (id) => document.getElementById(id);
 
@@ -144,6 +144,43 @@ function downloadJsonFile(filename, obj) {
   downloadTextFile(filename, json);
 }
 
+// ---------- Clipboard + fallback ----------
+function ensureClipboardFallback(text) {
+  let wrap = document.getElementById("sjsMailFallbackWrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "sjsMailFallbackWrap";
+    wrap.className = "sjs-fallback-wrap";
+
+    const hdr = document.createElement("div");
+    hdr.className = "hdr";
+    hdr.textContent = "Clipboard blocked. Copy manually:";
+
+    const ta = document.createElement("textarea");
+    ta.id = "sjsMailFallbackText";
+    ta.readOnly = true;
+
+    wrap.append(hdr, ta);
+
+    const host = document.getElementById("dirtyHost") || document.querySelector(".controls") || document.body;
+    host.insertAdjacentElement("afterend", wrap);
+  }
+
+  const ta = document.getElementById("sjsMailFallbackText");
+  if (ta) {
+    ta.value = text;
+    ta.focus();
+    ta.select();
+  }
+}
+
+function copyToClipboard(text) {
+  if (!navigator.clipboard || !window.isSecureContext) {
+    return Promise.reject(new Error("CLIPBOARD_UNAVAILABLE"));
+  }
+  return navigator.clipboard.writeText(text);
+}
+
 // ---------- Rules (durable + staged) ----------
 function getDurableRules() {
   return Array.isArray(window.APP_STATE?.rules?.explicitRules)
@@ -237,14 +274,13 @@ function getExplicitRuleHits(job) {
     if (!rt || !rv) return;
 
     let matched = false;
-    let field = "";
 
-    if (rt === "company" && comp === rv) { matched = true; field = "company"; }
-    else if (rt === "title" && title.includes(rv)) { matched = true; field = "title"; }
-    else if (rt === "location" && (loc.includes(rv) || text.includes(rv))) { matched = true; field = "location"; }
-    else if (rt === "keyword" && text.includes(rv)) { matched = true; field = "text"; }
+    if (rt === "company" && comp === rv) matched = true;
+    else if (rt === "title" && title.includes(rv)) matched = true;
+    else if (rt === "location" && (loc.includes(rv) || text.includes(rv))) matched = true;
+    else if (rt === "keyword" && text.includes(rv)) matched = true;
 
-    if (matched) hits.push({ type: rt, value: String(r.value), source, field });
+    if (matched) hits.push({ type: rt, value: String(r.value), source });
   }
 
   for (const r of durable) checkRule(r, "durable");
@@ -253,6 +289,7 @@ function getExplicitRuleHits(job) {
   return hits;
 }
 
+// ---------- Why (red/yellow/green) ----------
 function explainGates(job, relaxed = false) {
   const hits = getExplicitRuleHits(job);
   if (hits.length) {
@@ -279,9 +316,6 @@ function explainGates(job, relaxed = false) {
 }
 
 function getCandidateLeakHits(job) {
-  // Yellow signal: “reject, but consider blacklisting”
-  // Heuristic: durable TITLE-rule values show up in full text but NOT in the title,
-  // and aren't already covered by a keyword rule.
   const durable = getDurableRules();
   const staged = getStagedRules();
 
@@ -316,18 +350,13 @@ function computeWhyStatus(job) {
   const strict = explainGates(job, false);
   const relaxed = explainGates(job, true);
 
-  // Green: strict pass (clean)
   if (strict.pass) {
     const leaks = getCandidateLeakHits(job);
-    // Yellow: strict pass but likely blacklist candidate present (hygiene)
     if (leaks.length) return { status: "yellow", strict, relaxed, leaks };
     return { status: "green", strict, relaxed, leaks: [] };
   }
 
-  // Red: strict fail but relaxed pass (survived via relaxed)
   if (relaxed.pass) return { status: "red", strict, relaxed, leaks: [] };
-
-  // Fallback red (should rarely be visible)
   return { status: "red", strict, relaxed, leaks: [] };
 }
 
@@ -381,7 +410,6 @@ function buildWhyPanel(job, whyMeta) {
   }
 
   body.textContent = lines.join("\n");
-
   panel.append(header, body);
   return panel;
 }
@@ -625,6 +653,12 @@ function ensureDirtyUI() {
     const right = document.createElement("div");
     right.className = "right";
 
+    const copyBtn = document.createElement("button");
+    copyBtn.id = "copyRulesJson";
+    copyBtn.className = "btn";
+    copyBtn.textContent = "Copy rules.json";
+    copyBtn.onclick = () => copyPromoteJson();
+
     const mailBtn = document.createElement("button");
     mailBtn.id = "mailPromotePacket";
     mailBtn.className = "btn";
@@ -637,7 +671,7 @@ function ensureDirtyUI() {
     dlBtn.textContent = "Download rules.json";
     dlBtn.onclick = () => downloadPromotePacket();
 
-    right.append(mailBtn, dlBtn);
+    right.append(copyBtn, mailBtn, dlBtn);
 
     wrap.append(left, right);
     host.appendChild(wrap);
@@ -671,40 +705,16 @@ function downloadPromotePacket() {
   toast("Downloaded rules.json");
 }
 
-function ensureMailFallback(body) {
-  let wrap = document.getElementById("sjsMailFallbackWrap");
-  if (!wrap) {
-    wrap = document.createElement("div");
-    wrap.id = "sjsMailFallbackWrap";
-    wrap.className = "sjs-fallback-wrap";
+function copyPromoteJson() {
+  const packet = rulesAsPromotePacket();
+  const json = JSON.stringify(packet, null, 2);
 
-    const hdr = document.createElement("div");
-    hdr.className = "hdr";
-    hdr.textContent = "Promote packet (copy manually)";
-
-    const ta = document.createElement("textarea");
-    ta.id = "sjsMailFallbackText";
-    ta.readOnly = true;
-
-    wrap.append(hdr, ta);
-
-    const host = document.getElementById("dirtyHost") || document.querySelector(".controls") || document.body;
-    host.insertAdjacentElement("afterend", wrap);
-  }
-
-  const ta = document.getElementById("sjsMailFallbackText");
-  if (ta) {
-    ta.value = body;
-    ta.focus();
-    ta.select();
-  }
-}
-
-function copyToClipboard(text) {
-  if (!navigator.clipboard || !window.isSecureContext) {
-    return Promise.reject(new Error("CLIPBOARD_UNAVAILABLE"));
-  }
-  return navigator.clipboard.writeText(text);
+  copyToClipboard(json).then(() => {
+    toast("rules.json copied");
+  }).catch(() => {
+    ensureClipboardFallback(json);
+    toast("Clipboard blocked, fallback shown");
+  });
 }
 
 function sendMailPromotePacket() {
@@ -712,17 +722,13 @@ function sendMailPromotePacket() {
   const subject = `SJS PROMOTE PACKET — Dirty rules (${getStagedRules().length})`;
   const body = `SUBJECT: ${subject}\n\n==== RULES.JSON BEGIN ====\n${JSON.stringify(packet, null, 2)}\n==== RULES.JSON END ====\n`;
 
-  const encodedSubject = encodeURIComponent(subject);
-  const encodedBody = encodeURIComponent(body);
-  const mailto = `mailto:?subject=${encodedSubject}&body=${encodedBody}`;
-
-  // Copy first (best effort), then open mailto.
   copyToClipboard(body).then(() => {
     toast("Promote packet copied");
   }).catch(() => {
-    ensureMailFallback(body);
+    ensureClipboardFallback(body);
     toast("Clipboard blocked, fallback shown");
   }).finally(() => {
+    const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailto;
   });
 }
@@ -1029,15 +1035,6 @@ function setProgress(statusText, done, total, noteText) {
 }
 
 // ---------- Rendering + Search ----------
-function isRejected(job) {
-  const r = state.memory[jobId(job)] || null;
-  return !!(r && r.rejected);
-}
-
-function isApplied(job) {
-  const r = state.memory[jobId(job)] || null;
-  return !!(r && r.appliedConfirmed);
-}
 function isNewHit(job) { return !state.memory[jobId(job)]; }
 function isViewedUndecided(job) {
   const r = state.memory[jobId(job)] || null;
@@ -1174,11 +1171,18 @@ async function runSearch() {
   state.rendered = {};
 
   loadMemory();
+  loadSources(); // re-load every run (mobile tends to keep state weirdly)
 
   const tasks = [];
   for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
   for (const l of state.lever) tasks.push({ type: "Lever", label: l, fn: () => fetchLever(l) });
   for (const c of state.custom) tasks.push({ type: "Custom", label: c, fn: () => fetchCustom(c) });
+
+  if (!tasks.length) {
+    setLoading(false);
+    toast("No sources configured. Open Sources & Settings.");
+    return;
+  }
 
   const total = tasks.length;
   let done = 0, skipped = 0, failed = 0;
@@ -1187,7 +1191,7 @@ async function runSearch() {
   const PER_SOURCE_TIMEOUT_MS = 12000;
 
   setLoading(true, {
-    statusText: total ? `Searching sources (0/${total})...` : "No sources configured. Open Sources & Settings.",
+    statusText: `Searching sources (0/${total})...`,
     progressPct: 0,
     noteText: ""
   });
@@ -1252,16 +1256,12 @@ async function runSearch() {
       const bViewed = isViewedUndecided(b) ? 1 : 0;
       if (aViewed !== bViewed) return bViewed - aViewed;
 
-      const aTitle = norm(a.title);
-      const bTitle = norm(b.title);
-      return aTitle.localeCompare(bTitle);
+      return norm(a.title).localeCompare(norm(b.title));
     });
 
     passed = passed.slice(0, MAX_RESULTS);
 
-    for (const job of passed) {
-      out.appendChild(renderJob(job));
-    }
+    for (const job of passed) out.appendChild(renderJob(job));
 
     refreshDirtyUI();
     purgeRuleBlockedFromDOM();
@@ -1276,9 +1276,8 @@ async function runSearch() {
 
   try {
     await Promise.race([doSearch, timeoutPromise]);
-  } catch (e) {
-    if (timedOut) toast("Search timed out");
-    else toast("Search failed");
+  } catch {
+    toast(timedOut ? "Search timed out" : "Search failed");
     setLoading(false);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -1305,7 +1304,12 @@ function wireUI() {
   if (runBtn) runBtn.onclick = () => runSearch();
 
   const settingsBtn = $("btnSettings");
-  if (settingsBtn) settingsBtn.onclick = () => setSettingsVisible(!($("settings")?.hidden));
+  if (settingsBtn) settingsBtn.onclick = () => {
+    const s = $("settings");
+    // FIX: open if currently hidden, close if open
+    const open = s ? s.hidden : true;
+    setSettingsVisible(open);
+  };
 
   const saveBtn = $("btnSave");
   if (saveBtn) saveBtn.onclick = () => saveSourcesFromUI();

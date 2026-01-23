@@ -1,10 +1,8 @@
 // app.js — Strict Job Search v3.2
-// FIX: WhyInfo status was computed from a duplicate “explain” path that could drift and falsely mark everything green.
-// Now: status is computed from the SAME truth used for filtering: passesGates(strict/relaxed).
-// Green  = passes strict
-// Yellow = fails strict (and usually fails relaxed) AND has blacklist candidates worth reviewing
-// Red    = fails strict AND no worthwhile blacklist candidates (or only “relaxed-only pass”)
-// Keeps: Sources toggle hardened, wrapped slug parsing, Dirty card, Copy rules.json, Mail packet, Download rules.json.
+// Fixes in this pass:
+// 1) Blacklist UI: back to MULTI-CHECKLIST (pick multiple reasons in one pass), then Save => stages all selected rules AND removes the job card.
+// 2) Viewed jobs popping back: jobId is now stable across fetches (URL query/fragment stripped). Also: viewed-only jobs are suppressed when there are enough new items.
+// 3) “Everything green”: results now show a mix (greens/yellows/reds) instead of only “passed” jobs. Green means PASS under current mode (Strict/Relaxed).
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,13 +18,29 @@ const state = {
 const MAX_RESULTS = 15;
 const MEMORY_KEY = "jobMemoryV3";
 const TIMEOUT_MS = 180000; // 3 minutes
-
-// Volatile staged rules (dirty list)
 const STAGED_RULES_KEY = "sjs_staged_rules_v1";
 
 // ---------- Utilities ----------
+function safeUrlCore(u) {
+  try {
+    if (!u) return "";
+    const url = new URL(u, window.location.href);
+    return (url.origin + url.pathname).toLowerCase();
+  } catch {
+    // If it’s not a valid URL, just strip query-ish junk
+    return String(u || "").split("?")[0].split("#")[0].toLowerCase();
+  }
+}
+
+// Stable ID across fetches:
 function jobId(job) {
-  const base = job.url || (job.company + "|" + job.title + "|" + job.location);
+  const core = safeUrlCore(job.url);
+  const base = [
+    (job.company || "").trim().toLowerCase(),
+    (job.title || "").trim().toLowerCase(),
+    (job.location || "").trim().toLowerCase(),
+    core
+  ].join("|");
   return btoa(unescape(encodeURIComponent(base))).slice(0, 64);
 }
 
@@ -233,8 +247,6 @@ function stageRule(rule) {
       window.APP_STATE.stagedRules = staged;
     }
   }
-
-  refreshDirtyUI();
 }
 
 function evaluateExplicitRules(job) {
@@ -298,13 +310,17 @@ function getExplicitRuleHits(job) {
   style.id = "sjs-inline-css";
   style.textContent = `
     .bl-panel{ margin-top:10px; padding:10px; border-radius:12px; background:rgba(0,0,0,.20); border:1px solid rgba(255,255,255,.12); }
-    .bl-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
-    .bl-row label{ margin:0; font-weight:650; opacity:.92; }
-    .bl-row input[type="text"]{ flex:1; min-width:200px; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
+    .bl-muted{ opacity:.82; font-size:12px; margin-bottom:8px; }
+    .bl-grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
+    .bl-item{ display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.12); }
+    .bl-item input{ width:18px; height:18px; margin-top:2px; }
+    .bl-item .meta{ display:flex; flex-direction:column; gap:6px; flex:1; }
+    .bl-item .label{ font-weight:800; letter-spacing:.2px; opacity:.95; text-transform:capitalize; }
+    .bl-item input[type="text"]{ width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
     .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
     .bl-actions .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
     .bl-actions .btn:hover{ background:rgba(255,255,255,.12); }
-    .bl-muted{ opacity:.82; font-size:12px; }
+
     .appliedWrap{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.10); }
     .appliedWrap.checked{ border-color: rgba(150,255,120,.45); box-shadow: 0 0 0 2px rgba(150,255,120,.10) inset; }
     .appliedWrap input{ width:16px; height:16px; }
@@ -626,7 +642,7 @@ function passesGates(job, relaxed = false) {
   return true;
 }
 
-// ---------- Why semantics (TRUTH-LOCKED to passesGates) ----------
+// ---------- Why semantics ----------
 function getCandidateLeakHits(job) {
   const durable = getDurableRules();
   const staged = getStagedRules();
@@ -681,50 +697,26 @@ function explainGatesFromTruth(job, relaxed = false) {
   }
 
   const passTruth = passesGates(job, relaxed);
-  // If passTruth but we still assembled reasons, trust passTruth and clear reasons (keeps truth consistent).
   return { pass: passTruth, reasons: passTruth ? [] : reasons };
 }
 
+// Green means PASS under CURRENT mode. Yellow means FAIL but has blacklist candidates. Red means FAIL with nothing worth mining.
 function computeWhyStatus(job) {
-  const strictPass = passesGates(job, false);
-  const relaxedPass = passesGates(job, true);
+  const relaxed = (state.mode === "relaxed");
+  const passCurrent = passesGates(job, relaxed);
+  const strictMeta = explainGatesFromTruth(job, false);
+  const relaxedMeta = explainGatesFromTruth(job, true);
+
+  if (passCurrent) {
+    return { status: "green", strict: strictMeta, relaxed: relaxedMeta, leaks: [] };
+  }
+
   const leaks = getCandidateLeakHits(job);
-
-  if (strictPass) {
-    return {
-      status: "green",
-      strict: explainGatesFromTruth(job, false),
-      relaxed: explainGatesFromTruth(job, true),
-      leaks
-    };
-  }
-
-  // If it only passes relaxed, it’s still a reject signal (red) in your workflow.
-  if (!strictPass && relaxedPass) {
-    return {
-      status: "red",
-      strict: explainGatesFromTruth(job, false),
-      relaxed: explainGatesFromTruth(job, true),
-      leaks: []
-    };
-  }
-
-  // Fails both: yellow only if there are worthwhile blacklist candidates.
   if (leaks && leaks.length) {
-    return {
-      status: "yellow",
-      strict: explainGatesFromTruth(job, false),
-      relaxed: explainGatesFromTruth(job, true),
-      leaks
-    };
+    return { status: "yellow", strict: strictMeta, relaxed: relaxedMeta, leaks };
   }
 
-  return {
-    status: "red",
-    strict: explainGatesFromTruth(job, false),
-    relaxed: explainGatesFromTruth(job, true),
-    leaks: []
-  };
+  return { status: "red", strict: strictMeta, relaxed: relaxedMeta, leaks: [] };
 }
 
 function buildWhyPanel(job, whyMeta) {
@@ -751,7 +743,7 @@ function buildWhyPanel(job, whyMeta) {
 
   const lines = [];
 
-  if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
+  if (whyMeta.status === "green") lines.push("Verdict: PASS (current mode)");
   if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
   if (whyMeta.status === "red") lines.push("Verdict: REJECT");
 
@@ -796,59 +788,79 @@ function setRecord(id, patch, job) {
   return next;
 }
 
-function buildBlacklistPanel(job, id) {
+// MULTI-CHECKLIST Blacklist panel
+function buildBlacklistPanel(job, id, cardEl) {
   const panel = document.createElement("div");
   panel.className = "bl-panel";
 
   const intro = document.createElement("div");
   intro.className = "bl-muted";
-  intro.textContent = "Blacklist (stages a rule into Dirty). Choose a type, then Save.";
+  intro.textContent = "Blacklist checklist. Pick any combination, edit values if needed, then Save once. Card disappears after Save.";
   panel.appendChild(intro);
 
-  const row1 = document.createElement("div");
-  row1.className = "bl-row";
+  const grid = document.createElement("div");
+  grid.className = "bl-grid";
 
-  const typeLabel = document.createElement("label");
-  typeLabel.textContent = "Type";
+  function makeItem(type, labelText, defaultValue) {
+    const item = document.createElement("div");
+    item.className = "bl-item";
 
-  const typeSel = document.createElement("select");
-  typeSel.className = "btn";
-  ["title", "keyword", "location", "company"].forEach(t => {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    typeSel.appendChild(opt);
-  });
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
 
-  row1.append(typeLabel, typeSel);
+    const meta = document.createElement("div");
+    meta.className = "meta";
 
-  const row2 = document.createElement("div");
-  row2.className = "bl-row";
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = labelText;
 
-  const valueLabel = document.createElement("label");
-  valueLabel.textContent = "Value";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = defaultValue || "";
 
-  const valueInput = document.createElement("input");
-  valueInput.type = "text";
-  valueInput.value = job.title;
+    meta.append(label, input);
+    item.append(cb, meta);
 
-  const hint = document.createElement("div");
-  hint.className = "bl-muted";
-  hint.textContent = "Title blocks title text. Keyword blocks title/location/description. Location blocks location/text. Company blocks exact company slug.";
+    return { item, cb, input, type };
+  }
 
-  row2.append(valueLabel, valueInput);
+  const itTitle = makeItem("title", "Title", job.title);
+  const itKeyword = makeItem("keyword", "Keyword", job.title);
+  const itLocation = makeItem("location", "Location", job.location);
+  const itCompany = makeItem("company", "Company", job.company);
+
+  // Sensible defaults: Title + Keyword checked.
+  itTitle.cb.checked = true;
+  itKeyword.cb.checked = true;
+
+  grid.append(itTitle.item, itKeyword.item, itLocation.item, itCompany.item);
+  panel.appendChild(grid);
 
   const actions = document.createElement("div");
   actions.className = "bl-actions";
 
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn";
-  saveBtn.textContent = "Save to Dirty";
+  saveBtn.textContent = "Save (stage + remove card)";
   saveBtn.onclick = () => {
-    stageRule({ type: typeSel.value, value: valueInput.value });
-    purgeRuleBlockedFromDOM();
-    toast("Rule staged");
-    panel.remove();
+    const picks = [itTitle, itKeyword, itLocation, itCompany].filter(it => it.cb.checked);
+
+    if (!picks.length) {
+      toast("No blacklist items selected");
+      return;
+    }
+
+    for (const it of picks) {
+      stageRule({ type: it.type, value: it.input.value });
+    }
+
+    refreshDirtyUI();
+
+    // Remove card immediately after one blacklist pass.
+    if (cardEl && cardEl.remove) cardEl.remove();
+
+    toast("Staged to Dirty");
   };
 
   const closeBtn = document.createElement("button");
@@ -857,21 +869,14 @@ function buildBlacklistPanel(job, id) {
   closeBtn.onclick = () => panel.remove();
 
   actions.append(saveBtn, closeBtn);
+  panel.appendChild(actions);
 
-  typeSel.onchange = () => {
-    const t = typeSel.value;
-    if (t === "title") valueInput.value = job.title;
-    if (t === "keyword") valueInput.value = job.title;
-    if (t === "location") valueInput.value = job.location;
-    if (t === "company") valueInput.value = job.company;
-  };
-
-  panel.append(row1, row2, hint, actions);
   return panel;
 }
 
 // ---------- Render ----------
 function isNewHit(job) { return !state.memory[jobId(job)]; }
+function isViewed(job) { return !!(state.memory[jobId(job)]?.viewed); }
 function isViewedUndecided(job) {
   const r = state.memory[jobId(job)] || null;
   if (!r) return false;
@@ -911,7 +916,7 @@ function renderJob(job) {
   );
   whyBtn.setAttribute("aria-label", "Why");
   whyBtn.title =
-    whyMeta.status === "green" ? "PASS (strict)" :
+    whyMeta.status === "green" ? "PASS (current mode)" :
     whyMeta.status === "yellow" ? "REJECT (review)" :
     "REJECT";
 
@@ -951,6 +956,7 @@ function renderJob(job) {
     const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
     appliedWrap.classList.toggle("checked", next.appliedConfirmed);
     div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
+    if (next.appliedConfirmed) div.remove(); // if applied, remove from stack
   };
 
   appliedWrap.append(appliedCb, appliedLabel);
@@ -986,7 +992,7 @@ function renderJob(job) {
   blBtn.onclick = () => {
     const existing = div.querySelector(".bl-panel");
     if (existing) { existing.remove(); return; }
-    div.appendChild(buildBlacklistPanel(job, id));
+    div.appendChild(buildBlacklistPanel(job, id, div));
   };
 
   actions.append(viewBtn, rejectBtn, blBtn);
@@ -1181,7 +1187,7 @@ async function runSearch() {
         `${t.type}: ${t.label} (${done}/${total})`,
         done,
         total,
-        `Sources loaded: GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length} | Skipped: ${skipped}  Failed/Timed: ${failed}`
+        `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length} | Skipped: ${skipped}  Failed/Timed: ${failed}`
       );
 
       try {
@@ -1195,27 +1201,41 @@ async function runSearch() {
       done += 1;
     }
 
-    // Decide mode based on strict yield (existing behavior)
-    let passed = [];
-    if (state.mode === "relaxed") {
-      setMode("relaxed");
-      passed = jobs.filter(j => passesGates(j, true));
-    } else {
-      const strictPassed = jobs.filter(j => passesGates(j, false)).filter(j => !shouldHide(j));
-      const strictNew = strictPassed.filter(isNewHit);
+    // Candidate pool: exclude explicit rules + applied/rejected, then show a MIX with status indicators.
+    let candidates = jobs
+      .filter(j => !evaluateExplicitRules(j))
+      .filter(j => !shouldHide(j));
 
-      if (strictNew.length === 0) {
-        setMode("relaxed");
-        passed = jobs.filter(j => passesGates(j, true));
-      } else {
-        setMode("strict");
-        passed = strictPassed;
-      }
+    // De-dupe by stable jobId
+    const seen = new Set();
+    candidates = candidates.filter(j => {
+      const id = jobId(j);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+    // If there are enough NEW items, suppress viewed-only from resurfacing.
+    const newOnes = candidates.filter(isNewHit);
+    const enoughNew = newOnes.length >= MAX_RESULTS;
+    if (enoughNew) {
+      candidates = candidates.filter(j => isNewHit(j));
     }
 
-    passed = passed.filter(j => !shouldHide(j));
+    // Sort: green first, then yellow, then red. Within each: new first, then viewed-undecided.
+    function statusRank(s) {
+      if (s === "green") return 0;
+      if (s === "yellow") return 1;
+      return 2;
+    }
 
-    passed.sort((a, b) => {
+    candidates.sort((a, b) => {
+      const sa = computeWhyStatus(a).status;
+      const sb = computeWhyStatus(b).status;
+      const ra = statusRank(sa);
+      const rb = statusRank(sb);
+      if (ra !== rb) return ra - rb;
+
       const aNew = isNewHit(a) ? 1 : 0;
       const bNew = isNewHit(b) ? 1 : 0;
       if (aNew !== bNew) return bNew - aNew;
@@ -1227,9 +1247,9 @@ async function runSearch() {
       return norm(a.title).localeCompare(norm(b.title));
     });
 
-    passed = passed.slice(0, MAX_RESULTS);
+    candidates = candidates.slice(0, MAX_RESULTS);
 
-    for (const job of passed) out.appendChild(renderJob(job));
+    for (const job of candidates) out.appendChild(renderJob(job));
 
     refreshDirtyUI();
     purgeRuleBlockedFromDOM();
@@ -1238,8 +1258,8 @@ async function runSearch() {
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    if (!passed.length) toast("No matches (after rules/gates)");
-    else toast(`Loaded ${passed.length}`);
+    if (!candidates.length) toast("No matches (after explicit rules / hide rules)");
+    else toast(`Loaded ${candidates.length}`);
   })();
 
   try {

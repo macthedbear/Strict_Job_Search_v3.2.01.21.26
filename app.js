@@ -1,8 +1,12 @@
 // app.js — Strict Job Search v3.2
-// Fixes in this pass:
-// 1) Blacklist UI: back to MULTI-CHECKLIST (pick multiple reasons in one pass), then Save => stages all selected rules AND removes the job card.
-// 2) Viewed jobs popping back: jobId is now stable across fetches (URL query/fragment stripped). Also: viewed-only jobs are suppressed when there are enough new items.
-// 3) “Everything green”: results now show a mix (greens/yellows/reds) instead of only “passed” jobs. Green means PASS under current mode (Strict/Relaxed).
+// Bundle 1–4 (single pass):
+// 1) Color truth anchored to Strict:
+//    Green  = passes STRICT
+//    Yellow = fails STRICT but passes RELAXED, OR fails and has blacklist candidates worth mining
+//    Red    = fails both, nothing worth mining
+// 2) Mode does NOT change what green means. Mode only affects how wide you cast the net.
+// 3) Viewed resurfacing guard: if there are enough new candidates, suppress previously-viewed-undecided cards.
+// 4) Debug line in search status: "Strict pass: X | Relaxed pass: Y | Showing: Z"
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,7 +31,6 @@ function safeUrlCore(u) {
     const url = new URL(u, window.location.href);
     return (url.origin + url.pathname).toLowerCase();
   } catch {
-    // If it’s not a valid URL, just strip query-ish junk
     return String(u || "").split("?")[0].split("#")[0].toLowerCase();
   }
 }
@@ -700,20 +703,24 @@ function explainGatesFromTruth(job, relaxed = false) {
   return { pass: passTruth, reasons: passTruth ? [] : reasons };
 }
 
-// Green means PASS under CURRENT mode. Yellow means FAIL but has blacklist candidates. Red means FAIL with nothing worth mining.
+// Bundle #1 & #2: Colors do NOT depend on current mode.
+// Green is STRICT pass, always.
 function computeWhyStatus(job) {
-  const relaxed = (state.mode === "relaxed");
-  const passCurrent = passesGates(job, relaxed);
+  const strictPass = passesGates(job, false);
+  const relaxedPass = passesGates(job, true);
+
   const strictMeta = explainGatesFromTruth(job, false);
   const relaxedMeta = explainGatesFromTruth(job, true);
 
-  if (passCurrent) {
+  if (strictPass) {
     return { status: "green", strict: strictMeta, relaxed: relaxedMeta, leaks: [] };
   }
 
   const leaks = getCandidateLeakHits(job);
-  if (leaks && leaks.length) {
-    return { status: "yellow", strict: strictMeta, relaxed: relaxedMeta, leaks };
+
+  // Yellow if it would pass under relaxed, OR there are blacklist candidates worth mining.
+  if (relaxedPass || (leaks && leaks.length)) {
+    return { status: "yellow", strict: strictMeta, relaxed: relaxedMeta, leaks: leaks || [] };
   }
 
   return { status: "red", strict: strictMeta, relaxed: relaxedMeta, leaks: [] };
@@ -743,8 +750,8 @@ function buildWhyPanel(job, whyMeta) {
 
   const lines = [];
 
-  if (whyMeta.status === "green") lines.push("Verdict: PASS (current mode)");
-  if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
+  if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
+  if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates or relaxed-only pass)");
   if (whyMeta.status === "red") lines.push("Verdict: REJECT");
 
   lines.push(whyMeta.strict.pass ? "Strict: PASS" : "Strict: FAIL");
@@ -830,7 +837,6 @@ function buildBlacklistPanel(job, id, cardEl) {
   const itLocation = makeItem("location", "Location", job.location);
   const itCompany = makeItem("company", "Company", job.company);
 
-  // Sensible defaults: Title + Keyword checked.
   itTitle.cb.checked = true;
   itKeyword.cb.checked = true;
 
@@ -857,7 +863,6 @@ function buildBlacklistPanel(job, id, cardEl) {
 
     refreshDirtyUI();
 
-    // Remove card immediately after one blacklist pass.
     if (cardEl && cardEl.remove) cardEl.remove();
 
     toast("Staged to Dirty");
@@ -916,7 +921,7 @@ function renderJob(job) {
   );
   whyBtn.setAttribute("aria-label", "Why");
   whyBtn.title =
-    whyMeta.status === "green" ? "PASS (current mode)" :
+    whyMeta.status === "green" ? "PASS (strict)" :
     whyMeta.status === "yellow" ? "REJECT (review)" :
     "REJECT";
 
@@ -956,7 +961,7 @@ function renderJob(job) {
     const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
     appliedWrap.classList.toggle("checked", next.appliedConfirmed);
     div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
-    if (next.appliedConfirmed) div.remove(); // if applied, remove from stack
+    if (next.appliedConfirmed) div.remove();
   };
 
   appliedWrap.append(appliedCb, appliedLabel);
@@ -1162,7 +1167,7 @@ async function runSearch() {
   setLoading(true, {
     statusText: `Searching sources (0/${total})...`,
     progressPct: 0,
-    noteText: `Sources loaded: GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length}`
+    noteText: `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length}`
   });
 
   let timeoutHandle = null;
@@ -1187,7 +1192,7 @@ async function runSearch() {
         `${t.type}: ${t.label} (${done}/${total})`,
         done,
         total,
-        `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length} | Skipped: ${skipped}  Failed/Timed: ${failed}`
+        `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length} | Skipped: ${skipped} | Failed/Timed: ${failed}`
       );
 
       try {
@@ -1201,7 +1206,7 @@ async function runSearch() {
       done += 1;
     }
 
-    // Candidate pool: exclude explicit rules + applied/rejected, then show a MIX with status indicators.
+    // Base pool: exclude explicit rules + applied/rejected
     let candidates = jobs
       .filter(j => !evaluateExplicitRules(j))
       .filter(j => !shouldHide(j));
@@ -1215,14 +1220,26 @@ async function runSearch() {
       return true;
     });
 
-    // If there are enough NEW items, suppress viewed-only from resurfacing.
-    const newOnes = candidates.filter(isNewHit);
-    const enoughNew = newOnes.length >= MAX_RESULTS;
-    if (enoughNew) {
-      candidates = candidates.filter(j => isNewHit(j));
+    // Bundle #4 debug counts (computed BEFORE viewing suppression)
+    let strictPassCount = 0;
+    let relaxedPassCount = 0;
+    for (const j of candidates) {
+      if (passesGates(j, false)) strictPassCount++;
+      if (passesGates(j, true)) relaxedPassCount++;
     }
 
-    // Sort: green first, then yellow, then red. Within each: new first, then viewed-undecided.
+    // Bundle #3: if enough new items exist, suppress viewed-undecided resurfacing
+    const newOnes = candidates.filter(j => !state.memory[jobId(j)]);
+    const enoughNew = newOnes.length >= MAX_RESULTS;
+    if (enoughNew) {
+      candidates = candidates.filter(j => !isViewedUndecided(j));
+    }
+
+    // Mode controls how wide we cast the net, NOT color meaning:
+    // strict mode: prefer strict-pass first, but still show yellows/reds (for mining).
+    // relaxed mode: allow more candidates into the pool (already done by not filtering here).
+    // (We keep the pool broad and let sorting do the work.)
+
     function statusRank(s) {
       if (s === "green") return 0;
       if (s === "yellow") return 1;
@@ -1236,8 +1253,8 @@ async function runSearch() {
       const rb = statusRank(sb);
       if (ra !== rb) return ra - rb;
 
-      const aNew = isNewHit(a) ? 1 : 0;
-      const bNew = isNewHit(b) ? 1 : 0;
+      const aNew = !state.memory[jobId(a)] ? 1 : 0;
+      const bNew = !state.memory[jobId(b)] ? 1 : 0;
       if (aNew !== bNew) return bNew - aNew;
 
       const aViewed = isViewedUndecided(a) ? 1 : 0;
@@ -1247,19 +1264,25 @@ async function runSearch() {
       return norm(a.title).localeCompare(norm(b.title));
     });
 
-    candidates = candidates.slice(0, MAX_RESULTS);
+    const showing = candidates.slice(0, MAX_RESULTS);
 
-    for (const job of candidates) out.appendChild(renderJob(job));
+    for (const job of showing) out.appendChild(renderJob(job));
 
     refreshDirtyUI();
     purgeRuleBlockedFromDOM();
 
-    setLoading(false);
+    // Bundle #4: brief debug line in the status UI
+    setLoading(true, {
+      statusText: "Done",
+      progressPct: 100,
+      noteText: `Strict pass: ${strictPassCount} | Relaxed pass: ${relaxedPassCount} | Showing: ${showing.length}`
+    });
+    setTimeout(() => setLoading(false), 1400);
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    if (!candidates.length) toast("No matches (after explicit rules / hide rules)");
-    else toast(`Loaded ${candidates.length}`);
+    if (!showing.length) toast("No matches (after explicit / hide rules)");
+    else toast(`Loaded ${showing.length}`);
   })();
 
   try {
@@ -1269,7 +1292,6 @@ async function runSearch() {
     setLoading(false);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
-    setLoading(false);
   }
 }
 

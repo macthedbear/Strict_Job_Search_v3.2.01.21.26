@@ -1,12 +1,8 @@
 // app.js — Strict Job Search v3.2
-// Bundle 1–4 (single pass):
-// 1) Color truth anchored to Strict:
-//    Green  = passes STRICT
-//    Yellow = fails STRICT but passes RELAXED, OR fails and has blacklist candidates worth mining
-//    Red    = fails both, nothing worth mining
-// 2) Mode does NOT change what green means. Mode only affects how wide you cast the net.
-// 3) Viewed resurfacing guard: if there are enough new candidates, suppress previously-viewed-undecided cards.
-// 4) Debug line in search status: "Strict pass: X | Relaxed pass: Y | Showing: Z"
+// This pasteover adds:
+// - STRICT positive gates (green = passes STRICT + has at least one "target-role" signal)
+// - "Future Opportunities" kill switch (and similar pipeline buckets) for STRICT
+// - Keeps prior bundle behavior: colors anchored to STRICT; mode only affects how wide you cast the net; viewed resurfacing guard; debug line
 
 const $ = (id) => document.getElementById(id);
 
@@ -600,6 +596,65 @@ const INFRA_OWNERSHIP = [
   "sla", "slo", "slis", "runbook"
 ];
 
+// STRICT positive gates + pipeline kill switch
+const STRICT_KILL_TITLE_TERMS = [
+  "future opportunities",
+  "future opportunity",
+  "general interest",
+  "talent pool",
+  "talent community",
+  "pipeline",
+  "evergreen",
+  "open application",
+  "early career"
+];
+
+// Even if positives match, these should never be strict-green.
+const STRICT_HARD_FAIL_TITLE_TERMS = [
+  "sales",
+  "account executive",
+  "product manager",
+  "product designer",
+  "designer",
+  "accountant",
+  "compensation",
+  "federal systems integrator",
+  "systems integrator"
+];
+
+// STRICT positives (must match at least one to be strict-green)
+const STRICT_POSITIVE_TERMS = [
+  // DevRel / advocacy
+  "developer advocate",
+  "developer relations",
+  "devrel",
+  "developer evangelist",
+  "evangelist",
+  "advocacy",
+  "community",
+  // Support
+  "developer support",
+  "technical support",
+  "customer support",
+  "support engineer",
+  // Solutions / services
+  "solutions consultant",
+  "solution consultant",
+  "solutions architect",
+  "solution architect",
+  "implementation",
+  "professional services",
+  "delivery",
+  // Content / docs / education
+  "technical writer",
+  "documentation",
+  "content strategist",
+  "content strategy",
+  "education",
+  "enablement",
+  "training"
+];
+
 function countHits(text, arr) {
   let n = 0;
   for (const t of arr) if (text.includes(t)) n++;
@@ -621,9 +676,22 @@ function shouldExcludeForLocation(geoTextRaw) {
   return false;
 }
 
+function strictHasPositiveSignal(textLower) {
+  return STRICT_POSITIVE_TERMS.some(t => textLower.includes(t));
+}
+
+function strictKillSwitch(titleLower) {
+  return STRICT_KILL_TITLE_TERMS.some(t => titleLower.includes(t));
+}
+
+function strictHardFailTitle(titleLower) {
+  return STRICT_HARD_FAIL_TITLE_TERMS.some(t => titleLower.includes(t));
+}
+
 function passesGates(job, relaxed = false) {
   if (evaluateExplicitRules(job)) return false;
 
+  const titleLower = norm(job.title);
   const t = (job.title + " " + job.location + " " + job.description).toLowerCase();
 
   if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) return false;
@@ -637,8 +705,18 @@ function passesGates(job, relaxed = false) {
   if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) return false;
 
   if (!relaxed) {
+    // STRICT pipeline kill switch
+    if (strictKillSwitch(titleLower)) return false;
+
+    // STRICT hard-fail title terms (prevents "developer platform" product roles from ever going green)
+    if (strictHardFailTitle(titleLower)) return false;
+
+    // STRICT positive gate (must match at least one)
+    if (!strictHasPositiveSignal(t)) return false;
+
     if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) return false;
   } else {
+    // Relaxed stays broad, but still blocks onsite/hybrid/relocation
     if (/hybrid|onsite|on-site|relocation/.test(t)) return false;
   }
 
@@ -683,6 +761,7 @@ function explainGatesFromTruth(job, relaxed = false) {
     return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
   }
 
+  const titleLower = norm(job.title);
   const t = (job.title + " " + job.location + " " + job.description).toLowerCase();
   const reasons = [];
 
@@ -694,6 +773,9 @@ function explainGatesFromTruth(job, relaxed = false) {
   if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) reasons.push("Gate: enforcement/ownership language");
 
   if (!relaxed) {
+    if (strictKillSwitch(titleLower)) reasons.push("Gate: pipeline bucket (Future Opportunities / General Interest / etc.)");
+    if (strictHardFailTitle(titleLower)) reasons.push("Gate: strict hard-fail title term (Sales/Product/Designer/etc.)");
+    if (!strictHasPositiveSignal(t)) reasons.push("Gate: missing strict positive signal (DevRel/Support/Solutions/Docs/etc.)");
     if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) reasons.push("Gate: travel/onsite/hybrid/relocation (strict)");
   } else {
     if (/hybrid|onsite|on-site|relocation/.test(t)) reasons.push("Gate: onsite/hybrid/relocation (relaxed)");
@@ -703,7 +785,7 @@ function explainGatesFromTruth(job, relaxed = false) {
   return { pass: passTruth, reasons: passTruth ? [] : reasons };
 }
 
-// Bundle #1 & #2: Colors do NOT depend on current mode.
+// Colors do NOT depend on current mode.
 // Green is STRICT pass, always.
 function computeWhyStatus(job) {
   const strictPass = passesGates(job, false);
@@ -718,7 +800,6 @@ function computeWhyStatus(job) {
 
   const leaks = getCandidateLeakHits(job);
 
-  // Yellow if it would pass under relaxed, OR there are blacklist candidates worth mining.
   if (relaxedPass || (leaks && leaks.length)) {
     return { status: "yellow", strict: strictMeta, relaxed: relaxedMeta, leaks: leaks || [] };
   }
@@ -880,8 +961,6 @@ function buildBlacklistPanel(job, id, cardEl) {
 }
 
 // ---------- Render ----------
-function isNewHit(job) { return !state.memory[jobId(job)]; }
-function isViewed(job) { return !!(state.memory[jobId(job)]?.viewed); }
 function isViewedUndecided(job) {
   const r = state.memory[jobId(job)] || null;
   if (!r) return false;
@@ -1220,7 +1299,7 @@ async function runSearch() {
       return true;
     });
 
-    // Bundle #4 debug counts (computed BEFORE viewing suppression)
+    // Debug counts (computed before viewing suppression)
     let strictPassCount = 0;
     let relaxedPassCount = 0;
     for (const j of candidates) {
@@ -1228,18 +1307,14 @@ async function runSearch() {
       if (passesGates(j, true)) relaxedPassCount++;
     }
 
-    // Bundle #3: if enough new items exist, suppress viewed-undecided resurfacing
+    // Viewed resurfacing guard
     const newOnes = candidates.filter(j => !state.memory[jobId(j)]);
     const enoughNew = newOnes.length >= MAX_RESULTS;
     if (enoughNew) {
       candidates = candidates.filter(j => !isViewedUndecided(j));
     }
 
-    // Mode controls how wide we cast the net, NOT color meaning:
-    // strict mode: prefer strict-pass first, but still show yellows/reds (for mining).
-    // relaxed mode: allow more candidates into the pool (already done by not filtering here).
-    // (We keep the pool broad and let sorting do the work.)
-
+    // Sorting: green first, then yellow, then red
     function statusRank(s) {
       if (s === "green") return 0;
       if (s === "yellow") return 1;
@@ -1271,7 +1346,7 @@ async function runSearch() {
     refreshDirtyUI();
     purgeRuleBlockedFromDOM();
 
-    // Bundle #4: brief debug line in the status UI
+    // Debug line (brief)
     setLoading(true, {
       statusText: "Done",
       progressPct: 100,

@@ -1,6 +1,9 @@
 // app.js — Strict Job Search v3.2
-// Fixes: Sources & Settings toggle (was inverted), adds Copy rules.json to clipboard.
-// Keeps: WhyInfo red/yellow/green semantics + inline Why panel. No dirty-threshold gating changes.
+// Fixes for your report:
+// 1) Sources & Settings button: hardened wiring (works even if DOMContentLoaded timing is weird).
+// 2) Zero results: slug parsing now accepts newline OR whitespace OR commas (wrapped lists no longer break sources).
+// 3) Adds a tiny “Sources loaded” debug note during search so you can see if slugs are actually being read.
+// Keeps: WhyInfo red/yellow/green + Why panel. Keeps: Dirty card + Mail/Download + Copy rules.json.
 
 const $ = (id) => document.getElementById(id);
 
@@ -56,7 +59,7 @@ function setSettingsVisible(isOpen) {
   const s = $("settings");
   if (!s) return;
   s.hidden = !isOpen;
-  s.style.display = isOpen ? "" : "none";
+  // keep it simple. hidden is enough.
 }
 
 async function clearMemory() {
@@ -140,8 +143,7 @@ function downloadTextFile(filename, text) {
 }
 
 function downloadJsonFile(filename, obj) {
-  const json = JSON.stringify(obj, null, 2);
-  downloadTextFile(filename, json);
+  downloadTextFile(filename, JSON.stringify(obj, null, 2));
 }
 
 // ---------- Clipboard + fallback ----------
@@ -474,10 +476,7 @@ function purgeRuleBlockedFromDOM() {
       transition: opacity .18s ease, transform .18s ease;
       z-index:9999;
     }
-    .sjs-toast.show{
-      opacity:1;
-      transform:translateX(-50%) translateY(0);
-    }
+    .sjs-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
     .why-btn{
       width:34px; height:34px;
@@ -485,89 +484,39 @@ function purgeRuleBlockedFromDOM() {
       border:2px solid rgba(255,255,255,.28);
       background:rgba(0,0,0,.18);
       display:flex; align-items:center; justify-content:center;
-      padding:0;
-      cursor:pointer;
-      user-select:none;
-      flex:0 0 auto;
+      padding:0; cursor:pointer; user-select:none; flex:0 0 auto;
     }
-    .why-btn img{
-      width:18px; height:18px;
-      display:block;
-      object-fit:contain;
-      pointer-events:none;
-    }
-    .why-green{
-      border-color: rgba(0,255,170,.75);
-      box-shadow: 0 0 0 2px rgba(0,255,170,.18), 0 0 16px rgba(0,255,170,.22);
-    }
-    .why-yellow{
-      border-color: rgba(255,210,90,.85);
-      box-shadow: 0 0 0 2px rgba(255,210,90,.18), 0 0 16px rgba(255,210,90,.20);
-    }
-    .why-red{
-      border-color: rgba(255,90,90,.85);
-      box-shadow: 0 0 0 2px rgba(255,90,90,.18), 0 0 16px rgba(255,90,90,.20);
-    }
+    .why-btn img{ width:18px; height:18px; display:block; object-fit:contain; pointer-events:none; }
+    .why-green{ border-color: rgba(0,255,170,.75); box-shadow: 0 0 0 2px rgba(0,255,170,.18), 0 0 16px rgba(0,255,170,.22); }
+    .why-yellow{ border-color: rgba(255,210,90,.85); box-shadow: 0 0 0 2px rgba(255,210,90,.18), 0 0 16px rgba(255,210,90,.20); }
+    .why-red{ border-color: rgba(255,90,90,.85); box-shadow: 0 0 0 2px rgba(255,90,90,.18), 0 0 16px rgba(255,90,90,.20); }
 
-    .job .job-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px;
-    }
+    .job .job-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 
     .why-panel{
-      margin-top:10px;
-      border-radius:12px;
-      background:rgba(0,0,0,.22);
-      border:1px solid rgba(255,255,255,.14);
-      padding:10px;
-      white-space:pre-wrap;
-      line-height:1.35;
+      margin-top:10px; border-radius:12px;
+      background:rgba(0,0,0,.22); border:1px solid rgba(255,255,255,.14);
+      padding:10px; white-space:pre-wrap; line-height:1.35;
     }
-    .why-head{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      margin-bottom:8px;
-    }
-    .why-title{
-      font-weight:800;
-      letter-spacing:.2px;
-      opacity:.95;
-    }
+    .why-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .why-title{ font-weight:800; letter-spacing:.2px; opacity:.95; }
     .why-close{
-      width:34px; height:34px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.16);
-      background:rgba(255,255,255,.06);
-      color:rgba(255,255,255,.92);
-      cursor:pointer;
-      font-size:18px;
-      line-height:1;
+      width:34px; height:34px; border-radius:10px;
+      border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.06);
+      color:rgba(255,255,255,.92); cursor:pointer; font-size:18px; line-height:1;
     }
     .why-body{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size:12.5px;
-      opacity:.95;
+      font-size:12.5px; opacity:.95;
     }
 
     .sjs-fallback-wrap{
-      margin-top:10px;
-      padding:10px;
-      border-radius:12px;
-      background:rgba(0,0,0,.20);
-      border:1px solid rgba(255,255,255,.12);
+      margin-top:10px; padding:10px; border-radius:12px;
+      background:rgba(0,0,0,.20); border:1px solid rgba(255,255,255,.12);
     }
-    .sjs-fallback-wrap .hdr{
-      font-weight:800;
-      margin-bottom:6px;
-      opacity:.95;
-    }
+    .sjs-fallback-wrap .hdr{ font-weight:800; margin-bottom:6px; opacity:.95; }
     .sjs-fallback-wrap textarea{
-      width:100%;
-      min-height:120px;
-      border-radius:10px;
+      width:100%; min-height:120px; border-radius:10px;
       border:1px solid rgba(255,255,255,.14);
       background:rgba(250,250,255,.92);
       color:rgba(15,15,18,.92);
@@ -590,17 +539,19 @@ function setMode(m) {
   }
 }
 
-function parseLinesToSlugs(text) {
+// KEY FIX: accept wrapped lists (spaces/commas) as well as line breaks.
+function parseSlugs(text) {
   return String(text || "")
-    .split("\n")
+    .replace(/\r/g, "\n")
+    .split(/[\n,\t ]+/g)
     .map(s => s.trim())
     .filter(Boolean);
 }
 
 function loadSources() {
-  state.greenhouse = parseLinesToSlugs(localStorage.getItem("greenhouse") || "");
-  state.lever = parseLinesToSlugs(localStorage.getItem("lever") || "");
-  state.custom = parseLinesToSlugs(localStorage.getItem("custom") || "");
+  state.greenhouse = parseSlugs(localStorage.getItem("greenhouse") || "");
+  state.lever = parseSlugs(localStorage.getItem("lever") || "");
+  state.custom = parseSlugs(localStorage.getItem("custom") || "");
 }
 
 function saveSourcesFromUI() {
@@ -612,9 +563,7 @@ function saveSourcesFromUI() {
   localStorage.setItem("lever", lv);
   localStorage.setItem("custom", cu);
 
-  state.greenhouse = parseLinesToSlugs(gh);
-  state.lever = parseLinesToSlugs(lv);
-  state.custom = parseLinesToSlugs(cu);
+  loadSources();
 
   setSettingsVisible(false);
   toast("Saved sources");
@@ -692,23 +641,19 @@ function rulesAsPromotePacket() {
   const base = window.APP_STATE?.rules || { version: "1", explicitRules: [] };
   const durable = Array.isArray(base.explicitRules) ? base.explicitRules : [];
   const staged = getStagedRules();
-  const explicitRules = durable.concat(staged);
   return {
     version: String(base.version || "1"),
-    explicitRules
+    explicitRules: durable.concat(staged)
   };
 }
 
 function downloadPromotePacket() {
-  const packet = rulesAsPromotePacket();
-  downloadJsonFile("rules.json", packet);
+  downloadJsonFile("rules.json", rulesAsPromotePacket());
   toast("Downloaded rules.json");
 }
 
 function copyPromoteJson() {
-  const packet = rulesAsPromotePacket();
-  const json = JSON.stringify(packet, null, 2);
-
+  const json = JSON.stringify(rulesAsPromotePacket(), null, 2);
   copyToClipboard(json).then(() => {
     toast("rules.json copied");
   }).catch(() => {
@@ -728,8 +673,7 @@ function sendMailPromotePacket() {
     ensureClipboardFallback(body);
     toast("Clipboard blocked, fallback shown");
   }).finally(() => {
-    const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailto;
+    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   });
 }
 
@@ -1087,8 +1031,7 @@ function renderJob(job) {
   whyBtn.onclick = () => {
     const existing = div.querySelector(".why-panel");
     if (existing) { existing.remove(); return; }
-    const panel = buildWhyPanel(job, whyMeta);
-    div.appendChild(panel);
+    div.appendChild(buildWhyPanel(job, whyMeta));
   };
 
   head.append(titleWrap, whyBtn);
@@ -1151,8 +1094,7 @@ function renderJob(job) {
   blBtn.onclick = () => {
     const existing = div.querySelector(".bl-panel");
     if (existing) { existing.remove(); return; }
-    const panel = buildBlacklistPanel(job, id);
-    div.appendChild(panel);
+    div.appendChild(buildBlacklistPanel(job, id));
   };
 
   actions.append(viewBtn, rejectBtn, blBtn);
@@ -1171,7 +1113,7 @@ async function runSearch() {
   state.rendered = {};
 
   loadMemory();
-  loadSources(); // re-load every run (mobile tends to keep state weirdly)
+  loadSources();
 
   const tasks = [];
   for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
@@ -1193,7 +1135,7 @@ async function runSearch() {
   setLoading(true, {
     statusText: `Searching sources (0/${total})...`,
     progressPct: 0,
-    noteText: ""
+    noteText: `Sources loaded: GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length}`
   });
 
   let timeoutHandle = null;
@@ -1214,7 +1156,12 @@ async function runSearch() {
 
   const doSearch = (async () => {
     for (const t of tasks) {
-      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total, `Skipped: ${skipped}  Failed/Timed: ${failed}`);
+      setProgress(
+        `${t.type}: ${t.label} (${done}/${total})`,
+        done,
+        total,
+        `Sources loaded: GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length} | Skipped: ${skipped}  Failed/Timed: ${failed}`
+      );
 
       try {
         const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
@@ -1225,9 +1172,9 @@ async function runSearch() {
       }
 
       done += 1;
-      setProgress(`${t.type}: ${t.label} (${done}/${total})`, done, total, `Skipped: ${skipped}  Failed/Timed: ${failed}`);
     }
 
+    // Decide mode based on strict yield (your existing behavior)
     let passed = [];
     if (state.mode === "relaxed") {
       setMode("relaxed");
@@ -1285,7 +1232,7 @@ async function runSearch() {
   }
 }
 
-// ---------- Boot ----------
+// ---------- Boot (hardened) ----------
 function wireUI() {
   loadSources();
   loadMemory();
@@ -1301,15 +1248,25 @@ function wireUI() {
   setMode(state.mode);
 
   const runBtn = $("btnRun");
-  if (runBtn) runBtn.onclick = () => runSearch();
+  if (runBtn) {
+    runBtn.onclick = () => runSearch();
+    runBtn.addEventListener("click", (e) => { e.preventDefault(); runSearch(); }, true);
+  }
 
   const settingsBtn = $("btnSettings");
-  if (settingsBtn) settingsBtn.onclick = () => {
-    const s = $("settings");
-    // FIX: open if currently hidden, close if open
-    const open = s ? s.hidden : true;
-    setSettingsVisible(open);
-  };
+  if (settingsBtn) {
+    const toggle = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const s = $("settings");
+      const open = s ? s.hidden : true;
+      setSettingsVisible(open);
+      toast(open ? "Settings opened" : "Settings closed");
+    };
+    settingsBtn.onclick = toggle;
+    settingsBtn.addEventListener("click", toggle, true);
+    settingsBtn.addEventListener("touchend", toggle, { capture: true });
+  }
 
   const saveBtn = $("btnSave");
   if (saveBtn) saveBtn.onclick = () => saveSourcesFromUI();
@@ -1320,6 +1277,12 @@ function wireUI() {
   refreshDirtyUI();
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  try { wireUI(); } catch (e) { console.error(e); }
-});
+(function bootNow() {
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", () => {
+      try { wireUI(); } catch (e) { console.error(e); }
+    });
+  } else {
+    try { wireUI(); } catch (e) { console.error(e); }
+  }
+})();

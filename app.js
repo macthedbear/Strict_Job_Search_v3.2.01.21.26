@@ -1,9 +1,10 @@
 // app.js — Strict Job Search v3.2
-// Fixes for your report:
-// 1) Sources & Settings button: hardened wiring (works even if DOMContentLoaded timing is weird).
-// 2) Zero results: slug parsing now accepts newline OR whitespace OR commas (wrapped lists no longer break sources).
-// 3) Adds a tiny “Sources loaded” debug note during search so you can see if slugs are actually being read.
-// Keeps: WhyInfo red/yellow/green + Why panel. Keeps: Dirty card + Mail/Download + Copy rules.json.
+// FIX: WhyInfo status was computed from a duplicate “explain” path that could drift and falsely mark everything green.
+// Now: status is computed from the SAME truth used for filtering: passesGates(strict/relaxed).
+// Green  = passes strict
+// Yellow = fails strict (and usually fails relaxed) AND has blacklist candidates worth reviewing
+// Red    = fails strict AND no worthwhile blacklist candidates (or only “relaxed-only pass”)
+// Keeps: Sources toggle hardened, wrapped slug parsing, Dirty card, Copy rules.json, Mail packet, Download rules.json.
 
 const $ = (id) => document.getElementById(id);
 
@@ -59,7 +60,6 @@ function setSettingsVisible(isOpen) {
   const s = $("settings");
   if (!s) return;
   s.hidden = !isOpen;
-  // keep it simple. hidden is enough.
 }
 
 async function clearMemory() {
@@ -291,142 +291,6 @@ function getExplicitRuleHits(job) {
   return hits;
 }
 
-// ---------- Why (red/yellow/green) ----------
-function explainGates(job, relaxed = false) {
-  const hits = getExplicitRuleHits(job);
-  if (hits.length) {
-    return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
-  }
-
-  const t = norm(job.title + " " + job.location + " " + job.description);
-  const reasons = [];
-
-  if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) reasons.push("Gate: crypto/web3");
-  if (!/remote/.test(t)) reasons.push("Gate: not remote");
-  if (shouldExcludeForLocation(t)) reasons.push("Gate: non-US location");
-  if (/visa|sponsor|work authorization/.test(t)) reasons.push("Gate: visa/sponsorship");
-  if (excludeBackendInfraRole(t)) reasons.push("Gate: backend/infra role");
-  if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) reasons.push("Gate: enforcement/ownership language");
-
-  if (!relaxed) {
-    if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) reasons.push("Gate: travel/onsite/hybrid/relocation (strict)");
-  } else {
-    if (/hybrid|onsite|on-site|relocation/.test(t)) reasons.push("Gate: onsite/hybrid/relocation (relaxed)");
-  }
-
-  return { pass: reasons.length === 0, reasons };
-}
-
-function getCandidateLeakHits(job) {
-  const durable = getDurableRules();
-  const staged = getStagedRules();
-
-  const keywordSet = new Set(
-    durable.concat(staged)
-      .filter(r => norm(r?.type) === "keyword")
-      .map(r => norm(r?.value))
-      .filter(Boolean)
-  );
-
-  const titleRules = durable
-    .filter(r => norm(r?.type) === "title")
-    .map(r => String(r?.value || "").trim())
-    .filter(v => v.length >= 3);
-
-  const titleText = norm(job.title);
-  const fullText = norm(job.title + " " + job.location + " " + job.description);
-
-  const leaks = [];
-  for (const v of titleRules) {
-    const nv = norm(v);
-    if (!nv) continue;
-    if (keywordSet.has(nv)) continue;
-    if (titleText.includes(nv)) continue;
-    if (fullText.includes(nv)) leaks.push(v);
-  }
-
-  return Array.from(new Set(leaks));
-}
-
-function computeWhyStatus(job) {
-  const strict = explainGates(job, false);
-  const relaxed = explainGates(job, true);
-
-  if (strict.pass) {
-    const leaks = getCandidateLeakHits(job);
-    if (leaks.length) return { status: "yellow", strict, relaxed, leaks };
-    return { status: "green", strict, relaxed, leaks: [] };
-  }
-
-  if (relaxed.pass) return { status: "red", strict, relaxed, leaks: [] };
-  return { status: "red", strict, relaxed, leaks: [] };
-}
-
-function buildWhyPanel(job, whyMeta) {
-  const panel = document.createElement("div");
-  panel.className = "why-panel";
-
-  const header = document.createElement("div");
-  header.className = "why-head";
-
-  const title = document.createElement("div");
-  title.className = "why-title";
-  title.textContent = "Why";
-
-  const close = document.createElement("button");
-  close.className = "why-close";
-  close.type = "button";
-  close.textContent = "×";
-  close.onclick = () => panel.remove();
-
-  header.append(title, close);
-
-  const body = document.createElement("div");
-  body.className = "why-body";
-
-  const lines = [];
-
-  if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
-  if (whyMeta.status === "red") lines.push("Verdict: REJECT (only passes relaxed, or hard fail)");
-  if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
-
-  if (whyMeta.strict.pass) {
-    lines.push("Strict: PASS");
-  } else {
-    lines.push("Strict: FAIL");
-    for (const r of whyMeta.strict.reasons.slice(0, 10)) lines.push(`• ${r}`);
-  }
-
-  if (!whyMeta.strict.pass) {
-    if (whyMeta.relaxed.pass) {
-      lines.push("Relaxed: PASS");
-    } else {
-      lines.push("Relaxed: FAIL");
-      for (const r of whyMeta.relaxed.reasons.slice(0, 10)) lines.push(`• ${r}`);
-    }
-  }
-
-  if (whyMeta.leaks && whyMeta.leaks.length) {
-    lines.push("Potential blacklist candidates (present in text, not title):");
-    for (const v of whyMeta.leaks.slice(0, 12)) lines.push(`• ${v}`);
-  }
-
-  body.textContent = lines.join("\n");
-  panel.append(header, body);
-  return panel;
-}
-
-function purgeRuleBlockedFromDOM() {
-  const out = $("results");
-  if (!out) return;
-  const cards = out.querySelectorAll(".job[data-jobid]");
-  cards.forEach(card => {
-    const id = card.getAttribute("data-jobid");
-    const job = state.rendered[id];
-    if (job && evaluateExplicitRules(job)) card.remove();
-  });
-}
-
 // ---------- Minimal UI CSS (no styles.css change) ----------
 (function injectCSS() {
   if (document.getElementById("sjs-inline-css")) return;
@@ -539,7 +403,7 @@ function setMode(m) {
   }
 }
 
-// KEY FIX: accept wrapped lists (spaces/commas) as well as line breaks.
+// accept wrapped lists (spaces/commas) as well as line breaks.
 function parseSlugs(text) {
   return String(text || "")
     .replace(/\r/g, "\n")
@@ -677,6 +541,247 @@ function sendMailPromotePacket() {
   });
 }
 
+// ---------- Filtering + Gates ----------
+function shouldHide(job) {
+  const id = jobId(job);
+  const r = state.memory[id] || null;
+  if (!r) return false;
+  return !!(r.rejected || r.appliedConfirmed);
+}
+
+const NON_US_LOCATION_TERMS = [
+  "canada", "toronto", "vancouver",
+  "united kingdom", "uk", "london", "ireland", "dublin",
+  "europe", "emea", "germany", "france", "spain", "netherlands", "amsterdam",
+  "sweden", "norway", "denmark", "finland",
+  "australia", "new zealand",
+  "singapore", "japan", "india", "bangalore", "gurugram", "hyderabad",
+  "south africa",
+  "brazil", "colombia", "chile",
+  "mexico", "latam"
+];
+
+const AMBIGUOUS_OK_TERMS = [
+  "remote - us", "us remote", "remote (us)", "united states", "usa", "u.s."
+];
+
+const HARD_BACKEND_TERMS = [
+  "backend engineer", "back-end", "distributed systems", "microservices", "kubernetes",
+  "sre", "site reliability", "devops", "platform engineer", "infrastructure engineer",
+  "data engineer", "ml engineer", "machine learning engineer", "software engineer"
+];
+
+const BACKEND_PRIMITIVES = [
+  "java", "golang", "c++", "rust", "kafka", "grpc", "k8s", "helm", "terraform",
+  "aws", "gcp", "azure", "postgres", "mysql", "redis"
+];
+
+const INFRA_OWNERSHIP = [
+  "on-call", "oncall", "pager", "incident", "latency", "throughput", "availability",
+  "sla", "slo", "slis", "runbook"
+];
+
+function countHits(text, arr) {
+  let n = 0;
+  for (const t of arr) if (text.includes(t)) n++;
+  return n;
+}
+
+function excludeBackendInfraRole(text) {
+  if (countHits(text, HARD_BACKEND_TERMS) >= 1) return true;
+  if (countHits(text, BACKEND_PRIMITIVES) >= 2) return true;
+  if (countHits(text, INFRA_OWNERSHIP) >= 2) return true;
+  return false;
+}
+
+function shouldExcludeForLocation(geoTextRaw) {
+  const geo = (geoTextRaw || "").toLowerCase().trim();
+  if (!geo) return false;
+  if (AMBIGUOUS_OK_TERMS.some(t => geo.includes(t))) return false;
+  if (NON_US_LOCATION_TERMS.some(t => geo.includes(t))) return true;
+  return false;
+}
+
+function passesGates(job, relaxed = false) {
+  if (evaluateExplicitRules(job)) return false;
+
+  const t = (job.title + " " + job.location + " " + job.description).toLowerCase();
+
+  if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) return false;
+  if (!/remote/.test(t)) return false;
+
+  if (shouldExcludeForLocation(t)) return false;
+  if (/visa|sponsor|work authorization/.test(t)) return false;
+
+  if (excludeBackendInfraRole(t)) return false;
+
+  if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) return false;
+
+  if (!relaxed) {
+    if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) return false;
+  } else {
+    if (/hybrid|onsite|on-site|relocation/.test(t)) return false;
+  }
+
+  return true;
+}
+
+// ---------- Why semantics (TRUTH-LOCKED to passesGates) ----------
+function getCandidateLeakHits(job) {
+  const durable = getDurableRules();
+  const staged = getStagedRules();
+
+  const keywordSet = new Set(
+    durable.concat(staged)
+      .filter(r => norm(r?.type) === "keyword")
+      .map(r => norm(r?.value))
+      .filter(Boolean)
+  );
+
+  const titleRules = durable
+    .filter(r => norm(r?.type) === "title")
+    .map(r => String(r?.value || "").trim())
+    .filter(v => v.length >= 3);
+
+  const titleText = norm(job.title);
+  const fullText = norm(job.title + " " + job.location + " " + job.description);
+
+  const leaks = [];
+  for (const v of titleRules) {
+    const nv = norm(v);
+    if (!nv) continue;
+    if (keywordSet.has(nv)) continue;
+    if (titleText.includes(nv)) continue;
+    if (fullText.includes(nv)) leaks.push(v);
+  }
+
+  return Array.from(new Set(leaks));
+}
+
+function explainGatesFromTruth(job, relaxed = false) {
+  const hits = getExplicitRuleHits(job);
+  if (hits.length) {
+    return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
+  }
+
+  const t = (job.title + " " + job.location + " " + job.description).toLowerCase();
+  const reasons = [];
+
+  if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) reasons.push("Gate: crypto/web3");
+  if (!/remote/.test(t)) reasons.push("Gate: not remote");
+  if (shouldExcludeForLocation(t)) reasons.push("Gate: non-US location");
+  if (/visa|sponsor|work authorization/.test(t)) reasons.push("Gate: visa/sponsorship");
+  if (excludeBackendInfraRole(t)) reasons.push("Gate: backend/infra role");
+  if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) reasons.push("Gate: enforcement/ownership language");
+
+  if (!relaxed) {
+    if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) reasons.push("Gate: travel/onsite/hybrid/relocation (strict)");
+  } else {
+    if (/hybrid|onsite|on-site|relocation/.test(t)) reasons.push("Gate: onsite/hybrid/relocation (relaxed)");
+  }
+
+  const passTruth = passesGates(job, relaxed);
+  // If passTruth but we still assembled reasons, trust passTruth and clear reasons (keeps truth consistent).
+  return { pass: passTruth, reasons: passTruth ? [] : reasons };
+}
+
+function computeWhyStatus(job) {
+  const strictPass = passesGates(job, false);
+  const relaxedPass = passesGates(job, true);
+  const leaks = getCandidateLeakHits(job);
+
+  if (strictPass) {
+    return {
+      status: "green",
+      strict: explainGatesFromTruth(job, false),
+      relaxed: explainGatesFromTruth(job, true),
+      leaks
+    };
+  }
+
+  // If it only passes relaxed, it’s still a reject signal (red) in your workflow.
+  if (!strictPass && relaxedPass) {
+    return {
+      status: "red",
+      strict: explainGatesFromTruth(job, false),
+      relaxed: explainGatesFromTruth(job, true),
+      leaks: []
+    };
+  }
+
+  // Fails both: yellow only if there are worthwhile blacklist candidates.
+  if (leaks && leaks.length) {
+    return {
+      status: "yellow",
+      strict: explainGatesFromTruth(job, false),
+      relaxed: explainGatesFromTruth(job, true),
+      leaks
+    };
+  }
+
+  return {
+    status: "red",
+    strict: explainGatesFromTruth(job, false),
+    relaxed: explainGatesFromTruth(job, true),
+    leaks: []
+  };
+}
+
+function buildWhyPanel(job, whyMeta) {
+  const panel = document.createElement("div");
+  panel.className = "why-panel";
+
+  const header = document.createElement("div");
+  header.className = "why-head";
+
+  const title = document.createElement("div");
+  title.className = "why-title";
+  title.textContent = "Why";
+
+  const close = document.createElement("button");
+  close.className = "why-close";
+  close.type = "button";
+  close.textContent = "×";
+  close.onclick = () => panel.remove();
+
+  header.append(title, close);
+
+  const body = document.createElement("div");
+  body.className = "why-body";
+
+  const lines = [];
+
+  if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
+  if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
+  if (whyMeta.status === "red") lines.push("Verdict: REJECT");
+
+  lines.push(whyMeta.strict.pass ? "Strict: PASS" : "Strict: FAIL");
+  if (!whyMeta.strict.pass) for (const r of whyMeta.strict.reasons.slice(0, 12)) lines.push(`• ${r}`);
+
+  lines.push(whyMeta.relaxed.pass ? "Relaxed: PASS" : "Relaxed: FAIL");
+  if (!whyMeta.relaxed.pass) for (const r of whyMeta.relaxed.reasons.slice(0, 12)) lines.push(`• ${r}`);
+
+  if (whyMeta.leaks && whyMeta.leaks.length) {
+    lines.push("Potential blacklist candidates (present in text, not title):");
+    for (const v of whyMeta.leaks.slice(0, 12)) lines.push(`• ${v}`);
+  }
+
+  body.textContent = lines.join("\n");
+  panel.append(header, body);
+  return panel;
+}
+
+function purgeRuleBlockedFromDOM() {
+  const out = $("results");
+  if (!out) return;
+  const cards = out.querySelectorAll(".job[data-jobid]");
+  cards.forEach(card => {
+    const id = card.getAttribute("data-jobid");
+    const job = state.rendered[id];
+    if (job && evaluateExplicitRules(job)) card.remove();
+  });
+}
+
 // ---------- Job Card UI ----------
 function getRecord(id) {
   return state.memory[id] || { viewed: false, rejected: false, appliedConfirmed: false };
@@ -765,89 +870,130 @@ function buildBlacklistPanel(job, id) {
   return panel;
 }
 
-// ---------- Filtering ----------
-function shouldHide(job) {
-  const id = jobId(job);
-  const r = state.memory[id] || null;
+// ---------- Render ----------
+function isNewHit(job) { return !state.memory[jobId(job)]; }
+function isViewedUndecided(job) {
+  const r = state.memory[jobId(job)] || null;
   if (!r) return false;
-  return !!(r.rejected || r.appliedConfirmed);
+  return !!(r.viewed && !r.rejected && !r.appliedConfirmed);
 }
 
-const NON_US_LOCATION_TERMS = [
-  "canada", "toronto", "vancouver",
-  "united kingdom", "uk", "london", "ireland", "dublin",
-  "europe", "emea", "germany", "france", "spain", "netherlands", "amsterdam",
-  "sweden", "norway", "denmark", "finland",
-  "australia", "new zealand",
-  "singapore", "japan", "india", "bangalore", "gurugram", "hyderabad",
-  "south africa",
-  "brazil", "colombia", "chile",
-  "mexico", "latam"
-];
+function renderJob(job) {
+  const id = jobId(job);
+  state.rendered[id] = job;
 
-const AMBIGUOUS_OK_TERMS = [
-  "remote - us", "us remote", "remote (us)", "united states", "usa", "u.s."
-];
+  const record = getRecord(id);
+  const whyMeta = computeWhyStatus(job);
 
-const HARD_BACKEND_TERMS = [
-  "backend engineer", "back-end", "distributed systems", "microservices", "kubernetes",
-  "sre", "site reliability", "devops", "platform engineer", "infrastructure engineer",
-  "data engineer", "ml engineer", "machine learning engineer", "software engineer"
-];
+  const div = document.createElement("div");
+  div.className = "job";
+  div.setAttribute("data-jobid", id);
 
-const BACKEND_PRIMITIVES = [
-  "java", "golang", "c++", "rust", "kafka", "grpc", "k8s", "helm", "terraform",
-  "aws", "gcp", "azure", "postgres", "mysql", "redis"
-];
+  if (record.viewed) div.classList.add("viewed");
+  if (record.rejected) div.classList.add("rejected");
+  if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
 
-const INFRA_OWNERSHIP = [
-  "on-call", "oncall", "pager", "incident", "latency", "throughput", "availability",
-  "sla", "slo", "slis", "runbook"
-];
+  const head = document.createElement("div");
+  head.className = "job-head";
 
-function countHits(text, arr) {
-  let n = 0;
-  for (const t of arr) if (text.includes(t)) n++;
-  return n;
-}
+  const titleWrap = document.createElement("div");
+  const h3 = document.createElement("h3");
+  h3.textContent = job.title;
+  const p = document.createElement("p");
+  p.textContent = job.location;
+  titleWrap.append(h3, p);
 
-function excludeBackendInfraRole(text) {
-  if (countHits(text, HARD_BACKEND_TERMS) >= 1) return true;
-  if (countHits(text, BACKEND_PRIMITIVES) >= 2) return true;
-  if (countHits(text, INFRA_OWNERSHIP) >= 2) return true;
-  return false;
-}
+  const whyBtn = document.createElement("button");
+  whyBtn.type = "button";
+  whyBtn.className = "why-btn " + (
+    whyMeta.status === "green" ? "why-green" :
+    whyMeta.status === "yellow" ? "why-yellow" : "why-red"
+  );
+  whyBtn.setAttribute("aria-label", "Why");
+  whyBtn.title =
+    whyMeta.status === "green" ? "PASS (strict)" :
+    whyMeta.status === "yellow" ? "REJECT (review)" :
+    "REJECT";
 
-function shouldExcludeForLocation(geoTextRaw) {
-  const geo = (geoTextRaw || "").toLowerCase().trim();
-  if (!geo) return false;
-  if (AMBIGUOUS_OK_TERMS.some(t => geo.includes(t))) return false;
-  if (NON_US_LOCATION_TERMS.some(t => geo.includes(t))) return true;
-  return false;
-}
+  const whyImg = document.createElement("img");
+  whyImg.src = "WhyInfo.png";
+  whyImg.alt = "Why";
+  whyBtn.appendChild(whyImg);
 
-function passesGates(job, relaxed = false) {
-  if (evaluateExplicitRules(job)) return false;
+  whyBtn.onclick = () => {
+    const existing = div.querySelector(".why-panel");
+    if (existing) { existing.remove(); return; }
+    div.appendChild(buildWhyPanel(job, whyMeta));
+  };
 
-  const t = (job.title + " " + job.location + " " + job.description).toLowerCase();
+  head.append(titleWrap, whyBtn);
+  div.appendChild(head);
 
-  if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) return false;
-  if (!/remote/.test(t)) return false;
+  const actions = document.createElement("div");
+  actions.className = "actions";
 
-  if (shouldExcludeForLocation(t)) return false;
-  if (/visa|sponsor|work authorization/.test(t)) return false;
+  const appliedWrap = document.createElement("div");
+  appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
 
-  if (excludeBackendInfraRole(t)) return false;
+  const appliedCb = document.createElement("input");
+  appliedCb.type = "checkbox";
+  appliedCb.checked = !!record.appliedConfirmed;
+  appliedCb.disabled = !record.viewed;
 
-  if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) return false;
+  const appliedLabel = document.createElement("label");
+  appliedLabel.textContent = "Applied";
 
-  if (!relaxed) {
-    if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) return false;
-  } else {
-    if (/hybrid|onsite|on-site|relocation/.test(t)) return false;
-  }
+  appliedCb.onchange = () => {
+    if (!getRecord(id).viewed) {
+      appliedCb.checked = false;
+      return;
+    }
+    const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
+    appliedWrap.classList.toggle("checked", next.appliedConfirmed);
+    div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
+  };
 
-  return true;
+  appliedWrap.append(appliedCb, appliedLabel);
+
+  const viewBtn = document.createElement("button");
+  viewBtn.className = "btn" + (record.viewed ? " touched" : "");
+  viewBtn.textContent = "View";
+  viewBtn.onclick = () => {
+    const next = setRecord(id, { viewed: true }, job);
+    viewBtn.classList.toggle("touched", next.viewed);
+    div.classList.add("viewed");
+    appliedCb.disabled = false;
+    if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
+    if (job.url) window.open(job.url, "_blank");
+  };
+
+  const rejectBtn = document.createElement("button");
+  rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
+  rejectBtn.textContent = "Reject";
+
+  const blBtn = document.createElement("button");
+  blBtn.className = "btn";
+  blBtn.textContent = "Blacklist";
+  blBtn.hidden = !record.rejected;
+
+  rejectBtn.onclick = () => {
+    const next = setRecord(id, { rejected: true }, job);
+    rejectBtn.classList.toggle("touched", next.rejected);
+    div.classList.add("rejected");
+    blBtn.hidden = false;
+  };
+
+  blBtn.onclick = () => {
+    const existing = div.querySelector(".bl-panel");
+    if (existing) { existing.remove(); return; }
+    div.appendChild(buildBlacklistPanel(job, id));
+  };
+
+  actions.append(viewBtn, rejectBtn, blBtn);
+  if (record.viewed) actions.appendChild(appliedWrap);
+
+  div.appendChild(actions);
+  return div;
 }
 
 // ---------- Fetchers ----------
@@ -978,132 +1124,7 @@ function setProgress(statusText, done, total, noteText) {
   setLoading(true, { statusText, progressPct: pct, noteText });
 }
 
-// ---------- Rendering + Search ----------
-function isNewHit(job) { return !state.memory[jobId(job)]; }
-function isViewedUndecided(job) {
-  const r = state.memory[jobId(job)] || null;
-  if (!r) return false;
-  return !!(r.viewed && !r.rejected && !r.appliedConfirmed);
-}
-
-function renderJob(job) {
-  const id = jobId(job);
-  state.rendered[id] = job;
-
-  const record = getRecord(id);
-  const whyMeta = computeWhyStatus(job);
-
-  const div = document.createElement("div");
-  div.className = "job";
-  div.setAttribute("data-jobid", id);
-
-  if (record.viewed) div.classList.add("viewed");
-  if (record.rejected) div.classList.add("rejected");
-  if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
-
-  const head = document.createElement("div");
-  head.className = "job-head";
-
-  const titleWrap = document.createElement("div");
-  const h3 = document.createElement("h3");
-  h3.textContent = job.title;
-  const p = document.createElement("p");
-  p.textContent = job.location;
-  titleWrap.append(h3, p);
-
-  const whyBtn = document.createElement("button");
-  whyBtn.type = "button";
-  whyBtn.className = "why-btn " + (
-    whyMeta.status === "green" ? "why-green" :
-    whyMeta.status === "yellow" ? "why-yellow" : "why-red"
-  );
-  whyBtn.setAttribute("aria-label", "Why");
-  whyBtn.title =
-    whyMeta.status === "green" ? "PASS (strict)" :
-    whyMeta.status === "yellow" ? "REJECT (review)" :
-    "REJECT (hard)";
-
-  const whyImg = document.createElement("img");
-  whyImg.src = "WhyInfo.png";
-  whyImg.alt = "Why";
-  whyBtn.appendChild(whyImg);
-
-  whyBtn.onclick = () => {
-    const existing = div.querySelector(".why-panel");
-    if (existing) { existing.remove(); return; }
-    div.appendChild(buildWhyPanel(job, whyMeta));
-  };
-
-  head.append(titleWrap, whyBtn);
-  div.appendChild(head);
-
-  const actions = document.createElement("div");
-  actions.className = "actions";
-
-  const appliedWrap = document.createElement("div");
-  appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
-
-  const appliedCb = document.createElement("input");
-  appliedCb.type = "checkbox";
-  appliedCb.checked = !!record.appliedConfirmed;
-  appliedCb.disabled = !record.viewed;
-
-  const appliedLabel = document.createElement("label");
-  appliedLabel.textContent = "Applied";
-
-  appliedCb.onchange = () => {
-    if (!getRecord(id).viewed) {
-      appliedCb.checked = false;
-      return;
-    }
-    const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
-    appliedWrap.classList.toggle("checked", next.appliedConfirmed);
-    div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
-  };
-
-  appliedWrap.append(appliedCb, appliedLabel);
-
-  const viewBtn = document.createElement("button");
-  viewBtn.className = "btn" + (record.viewed ? " touched" : "");
-  viewBtn.textContent = "View";
-  viewBtn.onclick = () => {
-    const next = setRecord(id, { viewed: true }, job);
-    viewBtn.classList.toggle("touched", next.viewed);
-    div.classList.add("viewed");
-    appliedCb.disabled = false;
-    if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
-    if (job.url) window.open(job.url, "_blank");
-  };
-
-  const rejectBtn = document.createElement("button");
-  rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
-  rejectBtn.textContent = "Reject";
-
-  const blBtn = document.createElement("button");
-  blBtn.className = "btn";
-  blBtn.textContent = "Blacklist";
-  blBtn.hidden = !record.rejected;
-
-  rejectBtn.onclick = () => {
-    const next = setRecord(id, { rejected: true }, job);
-    rejectBtn.classList.toggle("touched", next.rejected);
-    div.classList.add("rejected");
-    blBtn.hidden = false;
-  };
-
-  blBtn.onclick = () => {
-    const existing = div.querySelector(".bl-panel");
-    if (existing) { existing.remove(); return; }
-    div.appendChild(buildBlacklistPanel(job, id));
-  };
-
-  actions.append(viewBtn, rejectBtn, blBtn);
-  if (record.viewed) actions.appendChild(appliedWrap);
-
-  div.appendChild(actions);
-  return div;
-}
-
+// ---------- Search ----------
 async function runSearch() {
   const out = $("results");
   if (!out) return;
@@ -1174,7 +1195,7 @@ async function runSearch() {
       done += 1;
     }
 
-    // Decide mode based on strict yield (your existing behavior)
+    // Decide mode based on strict yield (existing behavior)
     let passed = [];
     if (state.mode === "relaxed") {
       setMode("relaxed");
@@ -1261,7 +1282,6 @@ function wireUI() {
       const s = $("settings");
       const open = s ? s.hidden : true;
       setSettingsVisible(open);
-      toast(open ? "Settings opened" : "Settings closed");
     };
     settingsBtn.onclick = toggle;
     settingsBtn.addEventListener("click", toggle, true);

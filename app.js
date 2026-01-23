@@ -1,5 +1,6 @@
-// app.js — Strict Job Search v3.2 (repo-ready)
-// FINAL+ : removes rules.txt everywhere, Save closes Settings (hard), dirty stack (json only)
+// app.js — Strict Job Search v3.2
+// Adds Why/Info icon with red/yellow/green semantics + inline explanation panel.
+// No dirty threshold gating changes in this version.
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,8 +55,6 @@ function saveMemory() {
 function setSettingsVisible(isOpen) {
   const s = $("settings");
   if (!s) return;
-
-  // Use BOTH, so CSS can't lie about visibility.
   s.hidden = !isOpen;
   s.style.display = isOpen ? "" : "none";
 }
@@ -110,8 +109,8 @@ async function clearMemory() {
   if ($("custom")) $("custom").value = "";
   if ($("results")) $("results").innerHTML = "";
 
-  const fb = document.getElementById("sjsMailFallback");
-  if (fb) fb.hidden = true;
+  const fb = document.getElementById("sjsMailFallbackWrap");
+  if (fb) fb.remove();
 
   setSettingsVisible(false);
 
@@ -119,18 +118,6 @@ async function clearMemory() {
   refreshDirtyUI();
 
   toast("Device data cleared");
-}
-
-function isLikelyMobile() {
-  const ua = navigator.userAgent || "";
-  const coarse = typeof window !== "undefined" && window.matchMedia
-    ? window.matchMedia("(pointer: coarse)").matches
-    : false;
-  const small = typeof window !== "undefined" && window.matchMedia
-    ? window.matchMedia("(max-width: 820px)").matches
-    : false;
-
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (coarse && small);
 }
 
 function downloadTextFile(filename, text) {
@@ -203,7 +190,6 @@ function stageRule(rule) {
     const staged = getStagedRules();
     staged.push(normalized);
     saveStagedRulesFallback(staged);
-
     if (window.APP_STATE && !Array.isArray(window.APP_STATE.stagedRules)) {
       window.APP_STATE.stagedRules = staged;
     }
@@ -258,9 +244,7 @@ function getExplicitRuleHits(job) {
     else if (rt === "location" && (loc.includes(rv) || text.includes(rv))) { matched = true; field = "location"; }
     else if (rt === "keyword" && text.includes(rv)) { matched = true; field = "text"; }
 
-    if (matched) {
-      hits.push({ type: rt, value: String(r.value), source, field });
-    }
+    if (matched) hits.push({ type: rt, value: String(r.value), source, field });
   }
 
   for (const r of durable) checkRule(r, "durable");
@@ -272,12 +256,10 @@ function getExplicitRuleHits(job) {
 function explainGates(job, relaxed = false) {
   const hits = getExplicitRuleHits(job);
   if (hits.length) {
-    // Explicit rules are always hard fails
     return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
   }
 
   const t = norm(job.title + " " + job.location + " " + job.description);
-
   const reasons = [];
 
   if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) reasons.push("Gate: crypto/web3");
@@ -297,10 +279,12 @@ function explainGates(job, relaxed = false) {
 }
 
 function getCandidateLeakHits(job) {
-  // Yellow signal: likely “rule hygiene” candidates.
-  // Heuristic: terms from TITLE rules show up in description/location text but NOT in the title.
+  // Yellow signal: “reject, but consider blacklisting”
+  // Heuristic: durable TITLE-rule values show up in full text but NOT in the title,
+  // and aren't already covered by a keyword rule.
   const durable = getDurableRules();
   const staged = getStagedRules();
+
   const keywordSet = new Set(
     durable.concat(staged)
       .filter(r => norm(r?.type) === "keyword")
@@ -320,12 +304,11 @@ function getCandidateLeakHits(job) {
   for (const v of titleRules) {
     const nv = norm(v);
     if (!nv) continue;
-    if (keywordSet.has(nv)) continue; // already covered by keyword rule
-    if (titleText.includes(nv)) continue; // already caught by title rule if it mattered
+    if (keywordSet.has(nv)) continue;
+    if (titleText.includes(nv)) continue;
     if (fullText.includes(nv)) leaks.push(v);
   }
 
-  // de-dupe, preserve order
   return Array.from(new Set(leaks));
 }
 
@@ -333,20 +316,22 @@ function computeWhyStatus(job) {
   const strict = explainGates(job, false);
   const relaxed = explainGates(job, true);
 
-  // NOTE: render list already filtered, but we compute status relative to strict.
+  // Green: strict pass (clean)
   if (strict.pass) {
     const leaks = getCandidateLeakHits(job);
+    // Yellow: strict pass but likely blacklist candidate present (hygiene)
     if (leaks.length) return { status: "yellow", strict, relaxed, leaks };
     return { status: "green", strict, relaxed, leaks: [] };
   }
 
+  // Red: strict fail but relaxed pass (survived via relaxed)
   if (relaxed.pass) return { status: "red", strict, relaxed, leaks: [] };
 
-  // Shouldn’t normally be visible, but keep deterministic.
+  // Fallback red (should rarely be visible)
   return { status: "red", strict, relaxed, leaks: [] };
 }
 
-function buildWhyPanel(job, whyMeta, onClose) {
+function buildWhyPanel(job, whyMeta) {
   const panel = document.createElement("div");
   panel.className = "why-panel";
 
@@ -361,7 +346,7 @@ function buildWhyPanel(job, whyMeta, onClose) {
   close.className = "why-close";
   close.type = "button";
   close.textContent = "×";
-  close.onclick = () => { panel.remove(); if (onClose) onClose(); };
+  close.onclick = () => panel.remove();
 
   header.append(title, close);
 
@@ -370,33 +355,29 @@ function buildWhyPanel(job, whyMeta, onClose) {
 
   const lines = [];
 
-  // Summary
   if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
   if (whyMeta.status === "red") lines.push("Verdict: REJECT (only passes relaxed, or hard fail)");
   if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
 
-  // Strict reasons (first fail reason, or pass)
   if (whyMeta.strict.pass) {
     lines.push("Strict: PASS");
   } else {
     lines.push("Strict: FAIL");
-    for (const r of whyMeta.strict.reasons.slice(0, 6)) lines.push(`• ${r}`);
+    for (const r of whyMeta.strict.reasons.slice(0, 10)) lines.push(`• ${r}`);
   }
 
-  // Relaxed reasons (useful when strict fails)
   if (!whyMeta.strict.pass) {
     if (whyMeta.relaxed.pass) {
       lines.push("Relaxed: PASS");
     } else {
       lines.push("Relaxed: FAIL");
-      for (const r of whyMeta.relaxed.reasons.slice(0, 6)) lines.push(`• ${r}`);
+      for (const r of whyMeta.relaxed.reasons.slice(0, 10)) lines.push(`• ${r}`);
     }
   }
 
-  // Yellow leaks
   if (whyMeta.leaks && whyMeta.leaks.length) {
     lines.push("Potential blacklist candidates (present in text, not title):");
-    for (const v of whyMeta.leaks.slice(0, 10)) lines.push(`• ${v}`);
+    for (const v of whyMeta.leaks.slice(0, 12)) lines.push(`• ${v}`);
   }
 
   body.textContent = lines.join("\n");
@@ -434,6 +415,7 @@ function purgeRuleBlockedFromDOM() {
     .appliedWrap.checked{ border-color: rgba(150,255,120,.45); box-shadow: 0 0 0 2px rgba(150,255,120,.10) inset; }
     .appliedWrap input{ width:16px; height:16px; }
     .appliedWrap label{ margin:0; font-weight:700; letter-spacing:.2px; }
+
     .dirtyWrap{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:14px;
       background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); margin-top:10px; }
     .dirtyWrap .left{ display:flex; flex-direction:column; gap:2px; }
@@ -442,10 +424,12 @@ function purgeRuleBlockedFromDOM() {
     .dirtyWrap .right{ display:flex; gap:10px; flex-wrap:wrap; }
     .dirtyWrap .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
     .dirtyWrap .btn:hover{ background:rgba(255,255,255,.12); }
+
     .sjs-statuswrap{ margin-top:12px; padding:12px; border-radius:14px; background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); }
     .sjs-progress{ height:10px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.10); margin-top:10px; }
     .sjs-progress > div{ height:100%; width:0%; background:rgba(80,200,255,.9); transition: width .2s ease; }
     .sjs-note{ margin-top:8px; opacity:.85; font-size:12px; }
+
     .sjs-toast{
       position:fixed;
       left:50%;
@@ -496,12 +480,14 @@ function purgeRuleBlockedFromDOM() {
       border-color: rgba(255,90,90,.85);
       box-shadow: 0 0 0 2px rgba(255,90,90,.18), 0 0 16px rgba(255,90,90,.20);
     }
+
     .job .job-head{
       display:flex;
       align-items:flex-start;
       justify-content:space-between;
       gap:12px;
     }
+
     .why-panel{
       margin-top:10px;
       border-radius:12px;
@@ -537,11 +523,35 @@ function purgeRuleBlockedFromDOM() {
       font-size:12.5px;
       opacity:.95;
     }
+
+    .sjs-fallback-wrap{
+      margin-top:10px;
+      padding:10px;
+      border-radius:12px;
+      background:rgba(0,0,0,.20);
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .sjs-fallback-wrap .hdr{
+      font-weight:800;
+      margin-bottom:6px;
+      opacity:.95;
+    }
+    .sjs-fallback-wrap textarea{
+      width:100%;
+      min-height:120px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(250,250,255,.92);
+      color:rgba(15,15,18,.92);
+      padding:8px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+    }
   `;
   document.head.appendChild(style);
 })();
 
-// ---------- Settings UI ----------
+// ---------- Mode UI ----------
 function setMode(m) {
   state.mode = m;
   const strictBtn = $("modeStrict");
@@ -578,12 +588,11 @@ function saveSourcesFromUI() {
   state.lever = parseLinesToSlugs(lv);
   state.custom = parseLinesToSlugs(cu);
 
-  // Hard close panel after saving to avoid drift / stale context.
   setSettingsVisible(false);
-
   toast("Saved sources");
 }
 
+// ---------- Dirty UI ----------
 function ensureDirtyUI() {
   let host = document.getElementById("dirtyHost");
   if (!host) {
@@ -644,6 +653,7 @@ function refreshDirtyUI() {
   if (el) el.textContent = `Dirty: ${n}`;
 }
 
+// ---------- Promote packet ----------
 function rulesAsPromotePacket() {
   const base = window.APP_STATE?.rules || { version: "1", explicitRules: [] };
   const durable = Array.isArray(base.explicitRules) ? base.explicitRules : [];
@@ -661,7 +671,39 @@ function downloadPromotePacket() {
   toast("Downloaded rules.json");
 }
 
+function ensureMailFallback(body) {
+  let wrap = document.getElementById("sjsMailFallbackWrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "sjsMailFallbackWrap";
+    wrap.className = "sjs-fallback-wrap";
+
+    const hdr = document.createElement("div");
+    hdr.className = "hdr";
+    hdr.textContent = "Promote packet (copy manually)";
+
+    const ta = document.createElement("textarea");
+    ta.id = "sjsMailFallbackText";
+    ta.readOnly = true;
+
+    wrap.append(hdr, ta);
+
+    const host = document.getElementById("dirtyHost") || document.querySelector(".controls") || document.body;
+    host.insertAdjacentElement("afterend", wrap);
+  }
+
+  const ta = document.getElementById("sjsMailFallbackText");
+  if (ta) {
+    ta.value = body;
+    ta.focus();
+    ta.select();
+  }
+}
+
 function copyToClipboard(text) {
+  if (!navigator.clipboard || !window.isSecureContext) {
+    return Promise.reject(new Error("CLIPBOARD_UNAVAILABLE"));
+  }
   return navigator.clipboard.writeText(text);
 }
 
@@ -672,21 +714,14 @@ function sendMailPromotePacket() {
 
   const encodedSubject = encodeURIComponent(subject);
   const encodedBody = encodeURIComponent(body);
-
   const mailto = `mailto:?subject=${encodedSubject}&body=${encodedBody}`;
 
-  // Try copying to clipboard first. If it fails, still open mail.
+  // Copy first (best effort), then open mailto.
   copyToClipboard(body).then(() => {
     toast("Promote packet copied");
   }).catch(() => {
-    const fb = document.getElementById("sjsMailFallback");
-    if (fb) {
-      fb.hidden = false;
-      fb.value = body;
-      fb.focus();
-      fb.select();
-    }
-    toast("Copy failed; using fallback");
+    ensureMailFallback(body);
+    toast("Clipboard blocked, fallback shown");
   }).finally(() => {
     window.location.href = mailto;
   });
@@ -706,7 +741,7 @@ function setRecord(id, patch, job) {
   return next;
 }
 
-function buildBlacklistPanel(job, id, card) {
+function buildBlacklistPanel(job, id) {
   const panel = document.createElement("div");
   panel.className = "bl-panel";
 
@@ -918,7 +953,6 @@ async function fetchCustom(url) {
 function ensureLoadingUI() {
   let statusWrap = document.getElementById("sjsStatusWrap");
   let progress = document.getElementById("sjsProgress");
-  let bar = document.getElementById("sjsProgressBar");
   let note = document.getElementById("sjsNote");
 
   if (!statusWrap) {
@@ -943,7 +977,7 @@ function ensureLoadingUI() {
     progress.className = "sjs-progress";
     progress.hidden = true;
 
-    bar = document.createElement("div");
+    const bar = document.createElement("div");
     bar.id = "sjsProgressBar";
     progress.appendChild(bar);
 
@@ -961,7 +995,7 @@ function ensureLoadingUI() {
   return {
     statusWrap,
     statusText: document.getElementById("sjsStatusText"),
-    progress,
+    progress: document.getElementById("sjsProgress"),
     bar: document.getElementById("sjsProgressBar"),
     note: document.getElementById("sjsNote")
   };
@@ -1026,7 +1060,6 @@ function renderJob(job) {
   if (record.rejected) div.classList.add("rejected");
   if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
 
-  // Header row: title + Why button
   const head = document.createElement("div");
   head.className = "job-head";
 
@@ -1039,13 +1072,15 @@ function renderJob(job) {
 
   const whyBtn = document.createElement("button");
   whyBtn.type = "button";
-  whyBtn.className = "why-btn " + (whyMeta.status === "green" ? "why-green" : whyMeta.status === "yellow" ? "why-yellow" : "why-red");
+  whyBtn.className = "why-btn " + (
+    whyMeta.status === "green" ? "why-green" :
+    whyMeta.status === "yellow" ? "why-yellow" : "why-red"
+  );
   whyBtn.setAttribute("aria-label", "Why");
-  whyBtn.title = whyMeta.status === "green"
-    ? "PASS (strict)"
-    : whyMeta.status === "yellow"
-      ? "REJECT (review)"
-      : "REJECT (hard)";
+  whyBtn.title =
+    whyMeta.status === "green" ? "PASS (strict)" :
+    whyMeta.status === "yellow" ? "REJECT (review)" :
+    "REJECT (hard)";
 
   const whyImg = document.createElement("img");
   whyImg.src = "WhyInfo.png";
@@ -1095,9 +1130,7 @@ function renderJob(job) {
     const next = setRecord(id, { viewed: true }, job);
     viewBtn.classList.toggle("touched", next.viewed);
     div.classList.add("viewed");
-
     appliedCb.disabled = false;
-
     if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
     if (job.url) window.open(job.url, "_blank");
   };
@@ -1121,7 +1154,7 @@ function renderJob(job) {
   blBtn.onclick = () => {
     const existing = div.querySelector(".bl-panel");
     if (existing) { existing.remove(); return; }
-    const panel = buildBlacklistPanel(job, id, div);
+    const panel = buildBlacklistPanel(job, id);
     div.appendChild(panel);
   };
 
@@ -1237,11 +1270,8 @@ async function runSearch() {
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    if (!passed.length) {
-      toast("No matches (after rules/gates)");
-    } else {
-      toast(`Loaded ${passed.length}`);
-    }
+    if (!passed.length) toast("No matches (after rules/gates)");
+    else toast(`Loaded ${passed.length}`);
   })();
 
   try {
@@ -1269,24 +1299,23 @@ function wireUI() {
   const relaxedBtn = $("modeRelaxed");
   if (strictBtn) strictBtn.onclick = () => setMode("strict");
   if (relaxedBtn) relaxedBtn.onclick = () => setMode("relaxed");
-
   setMode(state.mode);
 
-  const runBtn = $("run");
+  const runBtn = $("btnRun");
   if (runBtn) runBtn.onclick = () => runSearch();
 
-  const saveBtn = $("saveSources");
-  if (saveBtn) saveBtn.onclick = () => saveSourcesFromUI();
-
-  const settingsBtn = $("toggleSettings");
+  const settingsBtn = $("btnSettings");
   if (settingsBtn) settingsBtn.onclick = () => setSettingsVisible(!($("settings")?.hidden));
 
-  const deleteBtn = $("deleteMemory");
+  const saveBtn = $("btnSave");
+  if (saveBtn) saveBtn.onclick = () => saveSourcesFromUI();
+
+  const deleteBtn = $("btnClear");
   if (deleteBtn) deleteBtn.onclick = () => clearMemory();
 
   refreshDirtyUI();
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  try { wireUI(); } catch {}
+  try { wireUI(); } catch (e) { console.error(e); }
 });

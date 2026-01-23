@@ -234,6 +234,177 @@ function evaluateExplicitRules(job) {
   return false;
 }
 
+function getExplicitRuleHits(job) {
+  const durable = getDurableRules();
+  const staged = getStagedRules();
+
+  const comp = norm(job.company);
+  const title = norm(job.title);
+  const loc = norm(job.location);
+  const text = norm(job.title + " " + job.location + " " + job.description);
+
+  const hits = [];
+
+  function checkRule(r, source) {
+    const rt = norm(r?.type);
+    const rv = norm(r?.value);
+    if (!rt || !rv) return;
+
+    let matched = false;
+    let field = "";
+
+    if (rt === "company" && comp === rv) { matched = true; field = "company"; }
+    else if (rt === "title" && title.includes(rv)) { matched = true; field = "title"; }
+    else if (rt === "location" && (loc.includes(rv) || text.includes(rv))) { matched = true; field = "location"; }
+    else if (rt === "keyword" && text.includes(rv)) { matched = true; field = "text"; }
+
+    if (matched) {
+      hits.push({ type: rt, value: String(r.value), source, field });
+    }
+  }
+
+  for (const r of durable) checkRule(r, "durable");
+  for (const r of staged) checkRule(r, "staged");
+
+  return hits;
+}
+
+function explainGates(job, relaxed = false) {
+  const hits = getExplicitRuleHits(job);
+  if (hits.length) {
+    // Explicit rules are always hard fails
+    return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
+  }
+
+  const t = norm(job.title + " " + job.location + " " + job.description);
+
+  const reasons = [];
+
+  if (/crypto|blockchain|web3|token|coin|defi|nft|trading|investment/.test(t)) reasons.push("Gate: crypto/web3");
+  if (!/remote/.test(t)) reasons.push("Gate: not remote");
+  if (shouldExcludeForLocation(t)) reasons.push("Gate: non-US location");
+  if (/visa|sponsor|work authorization/.test(t)) reasons.push("Gate: visa/sponsorship");
+  if (excludeBackendInfraRole(t)) reasons.push("Gate: backend/infra role");
+  if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) reasons.push("Gate: enforcement/ownership language");
+
+  if (!relaxed) {
+    if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) reasons.push("Gate: travel/onsite/hybrid/relocation (strict)");
+  } else {
+    if (/hybrid|onsite|on-site|relocation/.test(t)) reasons.push("Gate: onsite/hybrid/relocation (relaxed)");
+  }
+
+  return { pass: reasons.length === 0, reasons };
+}
+
+function getCandidateLeakHits(job) {
+  // Yellow signal: likely “rule hygiene” candidates.
+  // Heuristic: terms from TITLE rules show up in description/location text but NOT in the title.
+  const durable = getDurableRules();
+  const staged = getStagedRules();
+  const keywordSet = new Set(
+    durable.concat(staged)
+      .filter(r => norm(r?.type) === "keyword")
+      .map(r => norm(r?.value))
+      .filter(Boolean)
+  );
+
+  const titleRules = durable
+    .filter(r => norm(r?.type) === "title")
+    .map(r => String(r?.value || "").trim())
+    .filter(v => v.length >= 3);
+
+  const titleText = norm(job.title);
+  const fullText = norm(job.title + " " + job.location + " " + job.description);
+
+  const leaks = [];
+  for (const v of titleRules) {
+    const nv = norm(v);
+    if (!nv) continue;
+    if (keywordSet.has(nv)) continue; // already covered by keyword rule
+    if (titleText.includes(nv)) continue; // already caught by title rule if it mattered
+    if (fullText.includes(nv)) leaks.push(v);
+  }
+
+  // de-dupe, preserve order
+  return Array.from(new Set(leaks));
+}
+
+function computeWhyStatus(job) {
+  const strict = explainGates(job, false);
+  const relaxed = explainGates(job, true);
+
+  // NOTE: render list already filtered, but we compute status relative to strict.
+  if (strict.pass) {
+    const leaks = getCandidateLeakHits(job);
+    if (leaks.length) return { status: "yellow", strict, relaxed, leaks };
+    return { status: "green", strict, relaxed, leaks: [] };
+  }
+
+  if (relaxed.pass) return { status: "red", strict, relaxed, leaks: [] };
+
+  // Shouldn’t normally be visible, but keep deterministic.
+  return { status: "red", strict, relaxed, leaks: [] };
+}
+
+function buildWhyPanel(job, whyMeta, onClose) {
+  const panel = document.createElement("div");
+  panel.className = "why-panel";
+
+  const header = document.createElement("div");
+  header.className = "why-head";
+
+  const title = document.createElement("div");
+  title.className = "why-title";
+  title.textContent = "Why";
+
+  const close = document.createElement("button");
+  close.className = "why-close";
+  close.type = "button";
+  close.textContent = "×";
+  close.onclick = () => { panel.remove(); if (onClose) onClose(); };
+
+  header.append(title, close);
+
+  const body = document.createElement("div");
+  body.className = "why-body";
+
+  const lines = [];
+
+  // Summary
+  if (whyMeta.status === "green") lines.push("Verdict: PASS (strict)");
+  if (whyMeta.status === "red") lines.push("Verdict: REJECT (only passes relaxed, or hard fail)");
+  if (whyMeta.status === "yellow") lines.push("Verdict: REJECT (review for blacklist candidates)");
+
+  // Strict reasons (first fail reason, or pass)
+  if (whyMeta.strict.pass) {
+    lines.push("Strict: PASS");
+  } else {
+    lines.push("Strict: FAIL");
+    for (const r of whyMeta.strict.reasons.slice(0, 6)) lines.push(`• ${r}`);
+  }
+
+  // Relaxed reasons (useful when strict fails)
+  if (!whyMeta.strict.pass) {
+    if (whyMeta.relaxed.pass) {
+      lines.push("Relaxed: PASS");
+    } else {
+      lines.push("Relaxed: FAIL");
+      for (const r of whyMeta.relaxed.reasons.slice(0, 6)) lines.push(`• ${r}`);
+    }
+  }
+
+  // Yellow leaks
+  if (whyMeta.leaks && whyMeta.leaks.length) {
+    lines.push("Potential blacklist candidates (present in text, not title):");
+    for (const v of whyMeta.leaks.slice(0, 10)) lines.push(`• ${v}`);
+  }
+
+  body.textContent = lines.join("\n");
+
+  panel.append(header, body);
+  return panel;
+}
+
 function purgeRuleBlockedFromDOM() {
   const out = $("results");
   if (!out) return;
@@ -255,60 +426,38 @@ function purgeRuleBlockedFromDOM() {
     .bl-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
     .bl-row label{ margin:0; font-weight:650; opacity:.92; }
     .bl-row input[type="text"]{ flex:1; min-width:200px; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
-    .bl-hint{ font-size:12px; opacity:.78; margin-top:6px; }
     .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
-    .sjs-dirtywrap{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto; }
-
-    .sjs-dirtytag{
-      display:inline-flex;
-      align-items:center;
-      height:32px;
-      padding:0 12px;
-      border-radius:999px;
-      border:1px solid rgba(0,0,0,.28);
-      background:#2dd4bf;
-      color:#0b0b0b;
-      font-size:12px;
-      font-weight:750;
-      letter-spacing:.2px;
-      white-space:nowrap;
-      opacity:1;
-    }
-
-    .sjs-dirtybtn{
-      height:32px;
-      padding:0 12px;
-      border-radius:999px;
-      border:1px solid rgba(0,0,0,.28);
-      background:#2dd4bf;
-      color:#0b0b0b;
-      font-size:12px;
-      font-weight:750;
-      letter-spacing:.2px;
-      white-space:nowrap;
-      line-height:32px;
-    }
-    .sjs-dirtybtn:hover{ filter:brightness(0.98); }
-    .sjs-dirtybtn:active{ filter:brightness(0.95); }
-    .sjs-dirtybtn:disabled{
-      opacity:.45;
-      cursor:not-allowed;
-      filter:none;
-    }
-
+    .bl-actions .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
+    .bl-actions .btn:hover{ background:rgba(255,255,255,.12); }
+    .bl-muted{ opacity:.82; font-size:12px; }
+    .appliedWrap{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.10); }
+    .appliedWrap.checked{ border-color: rgba(150,255,120,.45); box-shadow: 0 0 0 2px rgba(150,255,120,.10) inset; }
+    .appliedWrap input{ width:16px; height:16px; }
+    .appliedWrap label{ margin:0; font-weight:700; letter-spacing:.2px; }
+    .dirtyWrap{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:14px;
+      background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); margin-top:10px; }
+    .dirtyWrap .left{ display:flex; flex-direction:column; gap:2px; }
+    .dirtyWrap .count{ font-weight:900; letter-spacing:.3px; }
+    .dirtyWrap .hint{ opacity:.82; font-size:12px; }
+    .dirtyWrap .right{ display:flex; gap:10px; flex-wrap:wrap; }
+    .dirtyWrap .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
+    .dirtyWrap .btn:hover{ background:rgba(255,255,255,.12); }
+    .sjs-statuswrap{ margin-top:12px; padding:12px; border-radius:14px; background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); }
+    .sjs-progress{ height:10px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.10); margin-top:10px; }
+    .sjs-progress > div{ height:100%; width:0%; background:rgba(80,200,255,.9); transition: width .2s ease; }
+    .sjs-note{ margin-top:8px; opacity:.85; font-size:12px; }
     .sjs-toast{
       position:fixed;
       left:50%;
       bottom:18px;
-      transform:translateX(-50%) translateY(14px);
+      transform:translateX(-50%) translateY(8px);
+      background:rgba(0,0,0,.72);
+      color:#fff;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.14);
       opacity:0;
       pointer-events:none;
-      padding:10px 14px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.18);
-      background:rgba(0,0,0,.82);
-      color:rgba(255,255,255,.92);
-      font-size:12px;
       font-weight:650;
       transition: opacity .18s ease, transform .18s ease;
       z-index:9999;
@@ -317,92 +466,373 @@ function purgeRuleBlockedFromDOM() {
       opacity:1;
       transform:translateX(-50%) translateY(0);
     }
+
+    .why-btn{
+      width:34px; height:34px;
+      border-radius:999px;
+      border:2px solid rgba(255,255,255,.28);
+      background:rgba(0,0,0,.18);
+      display:flex; align-items:center; justify-content:center;
+      padding:0;
+      cursor:pointer;
+      user-select:none;
+      flex:0 0 auto;
+    }
+    .why-btn img{
+      width:18px; height:18px;
+      display:block;
+      object-fit:contain;
+      pointer-events:none;
+    }
+    .why-green{
+      border-color: rgba(0,255,170,.75);
+      box-shadow: 0 0 0 2px rgba(0,255,170,.18), 0 0 16px rgba(0,255,170,.22);
+    }
+    .why-yellow{
+      border-color: rgba(255,210,90,.85);
+      box-shadow: 0 0 0 2px rgba(255,210,90,.18), 0 0 16px rgba(255,210,90,.20);
+    }
+    .why-red{
+      border-color: rgba(255,90,90,.85);
+      box-shadow: 0 0 0 2px rgba(255,90,90,.18), 0 0 16px rgba(255,90,90,.20);
+    }
+    .job .job-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .why-panel{
+      margin-top:10px;
+      border-radius:12px;
+      background:rgba(0,0,0,.22);
+      border:1px solid rgba(255,255,255,.14);
+      padding:10px;
+      white-space:pre-wrap;
+      line-height:1.35;
+    }
+    .why-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .why-title{
+      font-weight:800;
+      letter-spacing:.2px;
+      opacity:.95;
+    }
+    .why-close{
+      width:34px; height:34px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.06);
+      color:rgba(255,255,255,.92);
+      cursor:pointer;
+      font-size:18px;
+      line-height:1;
+    }
+    .why-body{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12.5px;
+      opacity:.95;
+    }
   `;
   document.head.appendChild(style);
 })();
 
-// ---------- Settings ----------
-function parseLines(val) {
-  return String(val || "")
-    .split(/\n+/)
+// ---------- Settings UI ----------
+function setMode(m) {
+  state.mode = m;
+  const strictBtn = $("modeStrict");
+  const relaxedBtn = $("modeRelaxed");
+  if (strictBtn && relaxedBtn) {
+    strictBtn.classList.toggle("active", m === "strict");
+    relaxedBtn.classList.toggle("active", m === "relaxed");
+  }
+}
+
+function parseLinesToSlugs(text) {
+  return String(text || "")
+    .split("\n")
     .map(s => s.trim())
     .filter(Boolean);
 }
 
-function loadSettings() {
-  state.greenhouse = JSON.parse(localStorage.getItem("greenhouse") || "[]");
-  state.lever = JSON.parse(localStorage.getItem("lever") || "[]");
-  state.custom = JSON.parse(localStorage.getItem("custom") || "[]");
-
-  if ($("greenhouse")) $("greenhouse").value = state.greenhouse.join("\n");
-  if ($("lever")) $("lever").value = state.lever.join("\n");
-  if ($("custom")) $("custom").value = state.custom.join("\n");
+function loadSources() {
+  state.greenhouse = parseLinesToSlugs(localStorage.getItem("greenhouse") || "");
+  state.lever = parseLinesToSlugs(localStorage.getItem("lever") || "");
+  state.custom = parseLinesToSlugs(localStorage.getItem("custom") || "");
 }
 
-function saveSettings() {
-  state.greenhouse = parseLines($("greenhouse")?.value);
-  state.lever = parseLines($("lever")?.value);
-  state.custom = parseLines($("custom")?.value);
+function saveSourcesFromUI() {
+  const gh = $("greenhouse") ? $("greenhouse").value : "";
+  const lv = $("lever") ? $("lever").value : "";
+  const cu = $("custom") ? $("custom").value : "";
 
-  localStorage.setItem("greenhouse", JSON.stringify(state.greenhouse));
-  localStorage.setItem("lever", JSON.stringify(state.lever));
-  localStorage.setItem("custom", JSON.stringify(state.custom));
+  localStorage.setItem("greenhouse", gh);
+  localStorage.setItem("lever", lv);
+  localStorage.setItem("custom", cu);
 
-  // Always close panel on Save (hard close, CSS-proof)
+  state.greenhouse = parseLinesToSlugs(gh);
+  state.lever = parseLinesToSlugs(lv);
+  state.custom = parseLinesToSlugs(cu);
+
+  // Hard close panel after saving to avoid drift / stale context.
   setSettingsVisible(false);
 
-  toast(`Saved (Greenhouse: ${state.greenhouse.length}, Lever: ${state.lever.length}, Custom: ${state.custom.length})`);
+  toast("Saved sources");
 }
 
-// ---------- Mode ----------
-function setMode(m) {
-  state.mode = m;
-  $("modeStrict")?.classList.toggle("active", m === "strict");
-  $("modeRelaxed")?.classList.toggle("active", m === "relaxed");
-  document.body.classList.toggle("relaxed", m === "relaxed");
+function ensureDirtyUI() {
+  let host = document.getElementById("dirtyHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "dirtyHost";
+    const controls = document.querySelector(".controls") || document.body;
+    controls.insertAdjacentElement("afterend", host);
+  }
+
+  let wrap = document.getElementById("dirtyWrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "dirtyWrap";
+    wrap.className = "dirtyWrap";
+
+    const left = document.createElement("div");
+    left.className = "left";
+
+    const count = document.createElement("div");
+    count.id = "dirtyCount";
+    count.className = "count";
+    count.textContent = "Dirty: 0";
+
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = "Staged rules are local until promoted.";
+
+    left.append(count, hint);
+
+    const right = document.createElement("div");
+    right.className = "right";
+
+    const mailBtn = document.createElement("button");
+    mailBtn.id = "mailPromotePacket";
+    mailBtn.className = "btn";
+    mailBtn.textContent = "Mail promote packet";
+    mailBtn.onclick = () => sendMailPromotePacket();
+
+    const dlBtn = document.createElement("button");
+    dlBtn.id = "downloadRulesJson";
+    dlBtn.className = "btn";
+    dlBtn.textContent = "Download rules.json";
+    dlBtn.onclick = () => downloadPromotePacket();
+
+    right.append(mailBtn, dlBtn);
+
+    wrap.append(left, right);
+    host.appendChild(wrap);
+  }
+
+  return wrap;
 }
 
-// ---------- Gates ----------
-const HARD_BACKEND_TERMS = [
-  "on-call","pager","own production","production ownership","operating distributed",
-  "real-time systems","low-latency","multi-region aws","incident response",
-];
-const BACKEND_PRIMITIVES = [
-  "grpc","protobuf","redis","kafka","kinesis","flink","spark streaming",
-  "real-time streaming","streaming","event-driven","distributed cache","tcp","udp",
-];
-const INFRA_OWNERSHIP = [
-  "production infrastructure","service reliability","capacity planning",
-  "latency budget","latency budgets","availability target","availability targets",
-  "postmortem","terraform","cloudformation","kubernetes",
-];
+function refreshDirtyUI() {
+  ensureDirtyUI();
+  const n = getStagedRules().length;
+  const el = document.getElementById("dirtyCount");
+  if (el) el.textContent = `Dirty: ${n}`;
+}
+
+function rulesAsPromotePacket() {
+  const base = window.APP_STATE?.rules || { version: "1", explicitRules: [] };
+  const durable = Array.isArray(base.explicitRules) ? base.explicitRules : [];
+  const staged = getStagedRules();
+  const explicitRules = durable.concat(staged);
+  return {
+    version: String(base.version || "1"),
+    explicitRules
+  };
+}
+
+function downloadPromotePacket() {
+  const packet = rulesAsPromotePacket();
+  downloadJsonFile("rules.json", packet);
+  toast("Downloaded rules.json");
+}
+
+function copyToClipboard(text) {
+  return navigator.clipboard.writeText(text);
+}
+
+function sendMailPromotePacket() {
+  const packet = rulesAsPromotePacket();
+  const subject = `SJS PROMOTE PACKET — Dirty rules (${getStagedRules().length})`;
+  const body = `SUBJECT: ${subject}\n\n==== RULES.JSON BEGIN ====\n${JSON.stringify(packet, null, 2)}\n==== RULES.JSON END ====\n`;
+
+  const encodedSubject = encodeURIComponent(subject);
+  const encodedBody = encodeURIComponent(body);
+
+  const mailto = `mailto:?subject=${encodedSubject}&body=${encodedBody}`;
+
+  // Try copying to clipboard first. If it fails, still open mail.
+  copyToClipboard(body).then(() => {
+    toast("Promote packet copied");
+  }).catch(() => {
+    const fb = document.getElementById("sjsMailFallback");
+    if (fb) {
+      fb.hidden = false;
+      fb.value = body;
+      fb.focus();
+      fb.select();
+    }
+    toast("Copy failed; using fallback");
+  }).finally(() => {
+    window.location.href = mailto;
+  });
+}
+
+// ---------- Job Card UI ----------
+function getRecord(id) {
+  return state.memory[id] || { viewed: false, rejected: false, appliedConfirmed: false };
+}
+
+function setRecord(id, patch, job) {
+  const prev = getRecord(id);
+  const next = { ...prev, ...patch };
+  if (job) next.job = job;
+  state.memory[id] = next;
+  saveMemory();
+  return next;
+}
+
+function buildBlacklistPanel(job, id, card) {
+  const panel = document.createElement("div");
+  panel.className = "bl-panel";
+
+  const intro = document.createElement("div");
+  intro.className = "bl-muted";
+  intro.textContent = "Blacklist (stages a rule into Dirty). Choose a type, then Save.";
+  panel.appendChild(intro);
+
+  const row1 = document.createElement("div");
+  row1.className = "bl-row";
+
+  const typeLabel = document.createElement("label");
+  typeLabel.textContent = "Type";
+
+  const typeSel = document.createElement("select");
+  typeSel.className = "btn";
+  ["title", "keyword", "location", "company"].forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    typeSel.appendChild(opt);
+  });
+
+  row1.append(typeLabel, typeSel);
+
+  const row2 = document.createElement("div");
+  row2.className = "bl-row";
+
+  const valueLabel = document.createElement("label");
+  valueLabel.textContent = "Value";
+
+  const valueInput = document.createElement("input");
+  valueInput.type = "text";
+  valueInput.value = job.title;
+
+  const hint = document.createElement("div");
+  hint.className = "bl-muted";
+  hint.textContent = "Title blocks title text. Keyword blocks title/location/description. Location blocks location/text. Company blocks exact company slug.";
+
+  row2.append(valueLabel, valueInput);
+
+  const actions = document.createElement("div");
+  actions.className = "bl-actions";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn";
+  saveBtn.textContent = "Save to Dirty";
+  saveBtn.onclick = () => {
+    stageRule({ type: typeSel.value, value: valueInput.value });
+    purgeRuleBlockedFromDOM();
+    toast("Rule staged");
+    panel.remove();
+  };
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn";
+  closeBtn.textContent = "Close";
+  closeBtn.onclick = () => panel.remove();
+
+  actions.append(saveBtn, closeBtn);
+
+  typeSel.onchange = () => {
+    const t = typeSel.value;
+    if (t === "title") valueInput.value = job.title;
+    if (t === "keyword") valueInput.value = job.title;
+    if (t === "location") valueInput.value = job.location;
+    if (t === "company") valueInput.value = job.company;
+  };
+
+  panel.append(row1, row2, hint, actions);
+  return panel;
+}
+
+// ---------- Filtering ----------
+function shouldHide(job) {
+  const id = jobId(job);
+  const r = state.memory[id] || null;
+  if (!r) return false;
+  return !!(r.rejected || r.appliedConfirmed);
+}
+
 const NON_US_LOCATION_TERMS = [
-  "uk","united kingdom","london","england","scotland","wales","ireland",
-  "canada","toronto","vancouver","montreal","emea","apac","latam","eu","europe",
-  "european union","india","bangalore","bengaluru","hyderabad","pune","chennai",
-  "gurgaon","noida","singapore","australia","sydney","melbourne","germany","berlin",
-  "munich","france","paris","spain","madrid","barcelona","netherlands","amsterdam",
-  "sweden","stockholm","switzerland","zurich","geneva","poland","warsaw","romania",
-  "bucharest","czech","prague","austria","vienna","italy","milan","rome","portugal",
-  "lisbon","israel","tel aviv","japan","tokyo","korea","seoul","china","shanghai",
-  "beijing","shenzhen","mexico","brazil","argentina","chile","colombia",
-  "south africa","cape town","johannesburg","thailand","bangkok","vietnam",
-  "ho chi minh","hcmc","hanoi"
+  "canada", "toronto", "vancouver",
+  "united kingdom", "uk", "london", "ireland", "dublin",
+  "europe", "emea", "germany", "france", "spain", "netherlands", "amsterdam",
+  "sweden", "norway", "denmark", "finland",
+  "australia", "new zealand",
+  "singapore", "japan", "india", "bangalore", "gurugram", "hyderabad",
+  "south africa",
+  "brazil", "colombia", "chile",
+  "mexico", "latam"
 ];
-const AMBIGUOUS_OK_TERMS = ["global","remote","distributed","multiple locations","anywhere","americas"];
 
-function countHits(text, terms) {
-  let hits = 0;
-  for (const term of terms) if (text.includes(term)) hits += 1;
-  return hits;
+const AMBIGUOUS_OK_TERMS = [
+  "remote - us", "us remote", "remote (us)", "united states", "usa", "u.s."
+];
+
+const HARD_BACKEND_TERMS = [
+  "backend engineer", "back-end", "distributed systems", "microservices", "kubernetes",
+  "sre", "site reliability", "devops", "platform engineer", "infrastructure engineer",
+  "data engineer", "ml engineer", "machine learning engineer", "software engineer"
+];
+
+const BACKEND_PRIMITIVES = [
+  "java", "golang", "c++", "rust", "kafka", "grpc", "k8s", "helm", "terraform",
+  "aws", "gcp", "azure", "postgres", "mysql", "redis"
+];
+
+const INFRA_OWNERSHIP = [
+  "on-call", "oncall", "pager", "incident", "latency", "throughput", "availability",
+  "sla", "slo", "slis", "runbook"
+];
+
+function countHits(text, arr) {
+  let n = 0;
+  for (const t of arr) if (text.includes(t)) n++;
+  return n;
 }
-function excludeBackendInfraRole(jobText) {
-  const text = jobText.toLowerCase();
+
+function excludeBackendInfraRole(text) {
   if (countHits(text, HARD_BACKEND_TERMS) >= 1) return true;
   if (countHits(text, BACKEND_PRIMITIVES) >= 2) return true;
   if (countHits(text, INFRA_OWNERSHIP) >= 2) return true;
   return false;
 }
+
 function shouldExcludeForLocation(geoTextRaw) {
   const geo = (geoTextRaw || "").toLowerCase().trim();
   if (!geo) return false;
@@ -410,6 +840,7 @@ function shouldExcludeForLocation(geoTextRaw) {
   if (NON_US_LOCATION_TERMS.some(t => geo.includes(t))) return true;
   return false;
 }
+
 function passesGates(job, relaxed = false) {
   if (evaluateExplicitRules(job)) return false;
 
@@ -450,6 +881,7 @@ async function fetchGreenhouse(token) {
     }));
   } catch { return []; }
 }
+
 async function fetchLever(slug) {
   try {
     const r = await fetch(`https://api.lever.co/v0/postings/${slug}?mode=json`, { cache: "no-store" });
@@ -465,6 +897,7 @@ async function fetchLever(slug) {
     }));
   } catch { return []; }
 }
+
 async function fetchCustom(url) {
   try {
     const r = await fetch(url, { cache: "no-store" });
@@ -543,270 +976,33 @@ function hardStopAllLoaders() {
   if (pr) pr.hidden = true;
   if (nt) nt.hidden = true;
   if (br) br.style.width = "0%";
-
-  const btn = $("btnRun");
-  if (btn) btn.disabled = false;
 }
 
-function setLoading(on, opts = {}) {
+function setLoading(isLoading, opts = {}) {
   const ui = ensureLoadingUI();
-  const btn = $("btnRun");
+  ui.statusWrap.hidden = !isLoading;
+  ui.progress.hidden = !isLoading;
+  ui.note.hidden = !isLoading;
 
-  if (on) {
-    if (btn) {
-      btn.disabled = true;
-      btn.dataset.origText = btn.textContent;
-      btn.textContent = opts.buttonText || "Searching...";
-    }
-    ui.statusWrap.hidden = false;
-    ui.progress.hidden = false;
-    ui.note.hidden = false;
-
-    ui.statusText.textContent = opts.statusText || "Searching...";
-    ui.bar.style.width = (opts.progressPct ?? 0) + "%";
-    ui.note.textContent = opts.noteText || "";
-    return;
-  }
-
-  if (btn) {
-    btn.disabled = false;
-    btn.textContent = btn.dataset.origText || "Run Search";
-  }
-
-  ui.statusWrap.hidden = true;
-  ui.progress.hidden = true;
-  ui.note.hidden = true;
-  ui.bar.style.width = "0%";
-  ui.note.textContent = "";
+  if (ui.statusText) ui.statusText.textContent = opts.statusText || (isLoading ? "Searching..." : "");
+  if (ui.note) ui.note.textContent = opts.noteText || "";
+  if (ui.bar) ui.bar.style.width = (opts.progressPct || 0) + "%";
 }
 
-function setProgress(statusText, done, total, noteText = "") {
-  const ui = ensureLoadingUI();
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  ui.statusText.textContent = statusText;
-  ui.bar.style.width = pct + "%";
-  ui.note.textContent = noteText;
+function setProgress(statusText, done, total, noteText) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  setLoading(true, { statusText, progressPct: pct, noteText });
 }
 
-// ---------- Dirty export (JSON ONLY) ----------
-const SUBJECT_PREFIX = "new dirty addtions as of";
-function pad2(n) { return String(n).padStart(2, "0"); }
-function timestampForSubject(d = new Date()) {
-  const yyyy = d.getFullYear();
-  const mm = pad2(d.getMonth() + 1);
-  const dd = pad2(d.getDate());
-  const hh = pad2(d.getHours());
-  const mi = pad2(d.getMinutes());
-  return `${yyyy}:${mm}:${dd} ${hh}:${mi}`;
-}
-function buildGmailComposeUrl({ subject, body }) {
-  const base = "https://mail.google.com/mail/?view=cm&fs=1";
-  return `${base}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
-function ensureMailFallbackUI() {
-  const controls = document.querySelector(".controls") || document.body;
-
-  let wrap = document.getElementById("sjsMailFallback");
-  if (wrap) return wrap;
-
-  wrap = document.createElement("div");
-  wrap.id = "sjsMailFallback";
-  wrap.className = "bl-panel";
-
-  const h = document.createElement("div");
-  h.id = "sjsMailFallbackHeader";
-  h.style.fontWeight = "700";
-  h.textContent = "Mail packet (RULES.JSON only). Gmail opens with Subject + instructions. Paste clipboard payload into Gmail.";
-
-  const subjLabel = document.createElement("div");
-  subjLabel.className = "bl-hint";
-  subjLabel.textContent = "Subject (auto)";
-
-  const subj = document.createElement("input");
-  subj.type = "text";
-  subj.id = "sjsFallbackSubject";
-
-  const payloadLabel = document.createElement("div");
-  payloadLabel.className = "bl-hint";
-  payloadLabel.textContent = "Clipboard payload (RULES.JSON)";
-
-  const payload = document.createElement("textarea");
-  payload.id = "sjsFallbackPayload";
-  payload.rows = 12;
-  payload.style.width = "100%";
-
-  const actions = document.createElement("div");
-  actions.className = "bl-actions";
-
-  const btnCopyPayload = document.createElement("button");
-  btnCopyPayload.className = "btn primary sjs-dirtybtn";
-  btnCopyPayload.textContent = "Copy payload";
-
-  const btnDlJson = document.createElement("button");
-  btnDlJson.className = "btn sjs-dirtybtn";
-  btnDlJson.textContent = "Download rules.json";
-
-  const btnHide = document.createElement("button");
-  btnHide.className = "btn";
-  btnHide.textContent = "Hide";
-  btnHide.onclick = () => (wrap.hidden = true);
-
-  btnCopyPayload.onclick = async () => {
-    try { await navigator.clipboard.writeText(payload.value || ""); } catch {}
-  };
-
-  btnDlJson.onclick = () => {
-    try {
-      const staged = getStagedRules();
-      downloadJsonFile("rules.json", staged);
-    } catch {}
-  };
-
-  actions.append(btnCopyPayload, btnDlJson, btnHide);
-  wrap.append(h, subjLabel, subj, payloadLabel, payload, actions);
-  wrap.hidden = true;
-
-  controls.insertAdjacentElement("afterend", wrap);
-  return wrap;
-}
-async function mailDirtyList() {
-  const staged = getStagedRules();
-  if (!staged.length) return;
-
-  const subject = `${SUBJECT_PREFIX} ${timestampForSubject()}`;
-  const rulesJson = JSON.stringify(staged, null, 2);
-  const clipboardPayload = [
-    "SJS PROMOTE PACKET",
-    `SUBJECT: ${subject}`,
-    "",
-    "==== RULES.JSON BEGIN ====",
-    rulesJson,
-    "==== RULES.JSON END ====",
-    ""
-  ].join("\n");
-
-  let clipboardOK = false;
-  try { await navigator.clipboard.writeText(clipboardPayload); clipboardOK = true; } catch { clipboardOK = false; }
-
-  const ui = ensureMailFallbackUI();
-  ui.hidden = false;
-
-  const header = document.getElementById("sjsMailFallbackHeader");
-  if (header) {
-    header.textContent = clipboardOK
-      ? "Clipboard payload copied. Gmail will open with Subject + instructions. Paste payload into Gmail body. Enter TO. Send."
-      : "Clipboard blocked. Use Copy payload. Gmail will open with Subject + instructions. Paste payload into Gmail body. Enter TO. Send.";
-  }
-
-  const subjEl = document.getElementById("sjsFallbackSubject");
-  const payloadEl = document.getElementById("sjsFallbackPayload");
-  if (subjEl) subjEl.value = subject;
-  if (payloadEl) payloadEl.value = clipboardPayload;
-
-  const bodyInstructions = [
-    "OPERATOR STEPS:",
-    "1) Enter recipient email address in the TO: field.",
-    "2) Paste the clipboard payload into this email body (it contains RULES.JSON).",
-    "3) Hit send."
-  ].join("\n");
-
-  const gmailUrl = buildGmailComposeUrl({ subject, body: bodyInstructions });
-  try { window.open(gmailUrl, "_blank", "noopener,noreferrer"); } catch {}
-}
-function exportRulesJson() {
-  const staged = getStagedRules();
-  if (!staged.length) return;
-  downloadJsonFile("rules.json", staged);
-}
-
-// ---------- Rendering / Search / Dirty UI / Wire ----------
-/* The rest of the file is unchanged from your last version, except it now uses setSettingsVisible()
-   instead of directly setting .hidden, and it still contains NO rules.txt UI. */
-
-function buildBlacklistPanel(job, id, cardDiv) {
-  const panel = document.createElement("div");
-  panel.className = "bl-panel";
-
-  const mkRow = () => { const d = document.createElement("div"); d.className = "bl-row"; return d; };
-
-  const row1 = mkRow();
-  const cbCompany = document.createElement("input"); cbCompany.type = "checkbox";
-  const labCompany = document.createElement("label"); labCompany.textContent = `Company (${job.company})`;
-  row1.append(cbCompany, labCompany);
-
-  const row2 = mkRow();
-  const cbTitle = document.createElement("input"); cbTitle.type = "checkbox";
-  const labTitle = document.createElement("label"); labTitle.textContent = "Title phrase";
-  const inTitle = document.createElement("input"); inTitle.type = "text"; inTitle.value = job.title || "";
-  row2.append(cbTitle, labTitle, inTitle);
-
-  const row3 = mkRow();
-  const cbLoc = document.createElement("input"); cbLoc.type = "checkbox";
-  const labLoc = document.createElement("label"); labLoc.textContent = "Location phrase";
-  const inLoc = document.createElement("input"); inLoc.type = "text"; inLoc.value = job.location || "";
-  row3.append(cbLoc, labLoc, inLoc);
-
-  const row4 = mkRow();
-  const cbKw = document.createElement("input"); cbKw.type = "checkbox";
-  const labKw = document.createElement("label"); labKw.textContent = "Keyword(s)";
-  const inKw = document.createElement("input"); inKw.type = "text"; inKw.placeholder = "comma-separated (optional)";
-  row4.append(cbKw, labKw, inKw);
-
-  const hint = document.createElement("div");
-  hint.className = "bl-hint";
-  hint.textContent = "Stage rules locally. Mail/Download exports RULES.JSON only.";
-
-  const actions = document.createElement("div");
-  actions.className = "bl-actions";
-
-  const btnApply = document.createElement("button");
-  btnApply.className = "btn primary";
-  btnApply.textContent = "Stage rules";
-
-  const btnCancel = document.createElement("button");
-  btnCancel.className = "btn";
-  btnCancel.textContent = "Cancel";
-  btnCancel.onclick = () => panel.remove();
-
-  btnApply.onclick = () => {
-    if (cbCompany.checked) stageRule({ type: "company", value: job.company });
-    if (cbTitle.checked) stageRule({ type: "title", value: inTitle.value });
-    if (cbLoc.checked) stageRule({ type: "location", value: inLoc.value });
-    if (cbKw.checked) {
-      const parts = (inKw.value || "").split(",").map(s => s.trim()).filter(Boolean);
-      parts.forEach(p => stageRule({ type: "keyword", value: p }));
-    }
-    purgeRuleBlockedFromDOM();
-    cardDiv.remove();
-  };
-
-  actions.append(btnApply, btnCancel);
-  panel.append(row1, row2, row3, row4, hint, actions);
-  return panel;
-}
-
-function getRecord(id) {
-  return state.memory[id] || { viewed: false, rejected: false, appliedConfirmed: false, job: null };
-}
-
-function setRecord(id, patch, job) {
-  const prev = getRecord(id);
-  const next = {
-    viewed: !!(patch.viewed ?? prev.viewed),
-    rejected: !!(patch.rejected ?? prev.rejected),
-    appliedConfirmed: !!(patch.appliedConfirmed ?? prev.appliedConfirmed),
-    job: job || prev.job || null
-  };
-  if (next.appliedConfirmed) next.viewed = true;
-  state.memory[id] = next;
-  saveMemory();
-  return next;
-}
-
-function shouldHide(job) {
+// ---------- Rendering + Search ----------
+function isRejected(job) {
   const r = state.memory[jobId(job)] || null;
-  if (!r) return false;
-  return !!(r.rejected || r.appliedConfirmed);
+  return !!(r && r.rejected);
+}
+
+function isApplied(job) {
+  const r = state.memory[jobId(job)] || null;
+  return !!(r && r.appliedConfirmed);
 }
 function isNewHit(job) { return !state.memory[jobId(job)]; }
 function isViewedUndecided(job) {
@@ -820,6 +1016,7 @@ function renderJob(job) {
   state.rendered[id] = job;
 
   const record = getRecord(id);
+  const whyMeta = computeWhyStatus(job);
 
   const div = document.createElement("div");
   div.className = "job";
@@ -829,7 +1026,41 @@ function renderJob(job) {
   if (record.rejected) div.classList.add("rejected");
   if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
 
-  div.innerHTML = `<h3>${job.title}</h3><p>${job.location}</p>`;
+  // Header row: title + Why button
+  const head = document.createElement("div");
+  head.className = "job-head";
+
+  const titleWrap = document.createElement("div");
+  const h3 = document.createElement("h3");
+  h3.textContent = job.title;
+  const p = document.createElement("p");
+  p.textContent = job.location;
+  titleWrap.append(h3, p);
+
+  const whyBtn = document.createElement("button");
+  whyBtn.type = "button";
+  whyBtn.className = "why-btn " + (whyMeta.status === "green" ? "why-green" : whyMeta.status === "yellow" ? "why-yellow" : "why-red");
+  whyBtn.setAttribute("aria-label", "Why");
+  whyBtn.title = whyMeta.status === "green"
+    ? "PASS (strict)"
+    : whyMeta.status === "yellow"
+      ? "REJECT (review)"
+      : "REJECT (hard)";
+
+  const whyImg = document.createElement("img");
+  whyImg.src = "WhyInfo.png";
+  whyImg.alt = "Why";
+  whyBtn.appendChild(whyImg);
+
+  whyBtn.onclick = () => {
+    const existing = div.querySelector(".why-panel");
+    if (existing) { existing.remove(); return; }
+    const panel = buildWhyPanel(job, whyMeta);
+    div.appendChild(panel);
+  };
+
+  head.append(titleWrap, whyBtn);
+  div.appendChild(head);
 
   const actions = document.createElement("div");
   actions.className = "actions";
@@ -980,115 +1211,82 @@ async function runSearch() {
     passed = passed.filter(j => !shouldHide(j));
 
     passed.sort((a, b) => {
-      const aw = isViewedUndecided(a) ? 0 : (isNewHit(a) ? 1 : 2);
-      const bw = isViewedUndecided(b) ? 0 : (isNewHit(b) ? 1 : 2);
-      return aw - bw;
+      const aNew = isNewHit(a) ? 1 : 0;
+      const bNew = isNewHit(b) ? 1 : 0;
+      if (aNew !== bNew) return bNew - aNew;
+
+      const aViewed = isViewedUndecided(a) ? 1 : 0;
+      const bViewed = isViewedUndecided(b) ? 1 : 0;
+      if (aViewed !== bViewed) return bViewed - aViewed;
+
+      const aTitle = norm(a.title);
+      const bTitle = norm(b.title);
+      return aTitle.localeCompare(bTitle);
     });
 
-    passed.slice(0, MAX_RESULTS).forEach(j => out.appendChild(renderJob(j)));
+    passed = passed.slice(0, MAX_RESULTS);
 
-    if (total > 0) toast(`Run complete. Sources: ${total}. Results: ${Math.min(passed.length, MAX_RESULTS)}.`);
+    for (const job of passed) {
+      out.appendChild(renderJob(job));
+    }
+
     refreshDirtyUI();
+    purgeRuleBlockedFromDOM();
+
+    setLoading(false);
+
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    if (!passed.length) {
+      toast("No matches (after rules/gates)");
+    } else {
+      toast(`Loaded ${passed.length}`);
+    }
   })();
 
   try {
     await Promise.race([doSearch, timeoutPromise]);
-  } catch (err) {
-    if (String(err?.message || err) === "TIMEOUT" || timedOut) {
-      out.innerHTML = `<div class="sjs-error"><strong>Timed out</strong><div>Search exceeded 3 minutes. Start a new search.</div></div>`;
-      toast("Timed out (3 minutes)");
-    } else {
-      out.innerHTML = `<div class="sjs-error"><strong>Search error</strong><div>${String(err)}</div></div>`;
-      toast("Search error");
-    }
+  } catch (e) {
+    if (timedOut) toast("Search timed out");
+    else toast("Search failed");
+    setLoading(false);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     setLoading(false);
   }
 }
 
-function ensureDirtyUI() {
-  const controls = document.querySelector(".controls");
-  if (!controls) return null;
-
-  let wrap = document.getElementById("sjsDirtyWrap");
-  if (wrap) return wrap;
-
-  wrap = document.createElement("div");
-  wrap.id = "sjsDirtyWrap";
-  wrap.className = "sjs-dirtywrap";
-
-  const tag = document.createElement("div");
-  tag.id = "sjsDirtyTag";
-  tag.className = "sjs-dirtytag";
-  tag.textContent = "Dirty: 0";
-
-  const btnMail = document.createElement("button");
-  btnMail.id = "btnMailDirty";
-  btnMail.className = "btn sjs-dirtybtn";
-  btnMail.textContent = "Mail promote packet";
-  btnMail.onclick = mailDirtyList;
-
-  const btnDlJson = document.createElement("button");
-  btnDlJson.id = "btnDlRulesJson";
-  btnDlJson.className = "btn sjs-dirtybtn";
-  btnDlJson.textContent = "Download rules.json";
-  btnDlJson.onclick = exportRulesJson;
-
-  if (isLikelyMobile()) {
-    // leave both visible; adjust later if you want
-  }
-
-  wrap.append(tag, btnMail, btnDlJson);
-  controls.appendChild(wrap);
-  return wrap;
-}
-
-function refreshDirtyUI() {
-  const wrap = ensureDirtyUI();
-  if (!wrap) return;
-
-  const tag = document.getElementById("sjsDirtyTag");
-  const btnMail = document.getElementById("btnMailDirty");
-  const btnJ = document.getElementById("btnDlRulesJson");
-
-  const n = getStagedRules().length;
-  if (tag) tag.textContent = `Dirty: ${n}`;
-
-  const disabled = n === 0;
-  if (btnMail) btnMail.disabled = disabled;
-  if (btnJ) btnJ.disabled = disabled;
-
-  if (n > 0) purgeRuleBlockedFromDOM();
-}
-
-function wire() {
-  // Force initial closed state regardless of CSS.
-  setSettingsVisible(false);
-
-  $("btnSettings").onclick = () => {
-    const s = $("settings");
-    const isOpen = s ? (s.hidden === false && s.style.display !== "none") : false;
-    setSettingsVisible(!isOpen);
-    toast(!isOpen ? "Settings open" : "Settings closed");
-  };
-
-  $("btnSave").onclick = saveSettings;
-  $("btnRun").onclick = runSearch;
-  $("btnClear").onclick = () => { clearMemory(); };
-
-  $("modeStrict").onclick = () => setMode("strict");
-  $("modeRelaxed").onclick = () => setMode("relaxed");
-
-  loadSettings();
+// ---------- Boot ----------
+function wireUI() {
+  loadSources();
   loadMemory();
 
-  setTimeout(hardStopAllLoaders, 0);
+  if ($("greenhouse")) $("greenhouse").value = (localStorage.getItem("greenhouse") || "");
+  if ($("lever")) $("lever").value = (localStorage.getItem("lever") || "");
+  if ($("custom")) $("custom").value = (localStorage.getItem("custom") || "");
+
+  const strictBtn = $("modeStrict");
+  const relaxedBtn = $("modeRelaxed");
+  if (strictBtn) strictBtn.onclick = () => setMode("strict");
+  if (relaxedBtn) relaxedBtn.onclick = () => setMode("relaxed");
+
+  setMode(state.mode);
+
+  const runBtn = $("run");
+  if (runBtn) runBtn.onclick = () => runSearch();
+
+  const saveBtn = $("saveSources");
+  if (saveBtn) saveBtn.onclick = () => saveSourcesFromUI();
+
+  const settingsBtn = $("toggleSettings");
+  if (settingsBtn) settingsBtn.onclick = () => setSettingsVisible(!($("settings")?.hidden));
+
+  const deleteBtn = $("deleteMemory");
+  if (deleteBtn) deleteBtn.onclick = () => clearMemory();
+
   refreshDirtyUI();
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", wire);
-} else {
-  wire();
-}
+window.addEventListener("DOMContentLoaded", () => {
+  try { wireUI(); } catch {}
+});

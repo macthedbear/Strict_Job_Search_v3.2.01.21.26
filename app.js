@@ -1,8 +1,5 @@
-// app.js — Strict Job Search v3.2
-// This pasteover adds:
-// - STRICT positive gates (green = passes STRICT + has at least one "target-role" signal)
-// - "Future Opportunities" kill switch (and similar pipeline buckets) for STRICT
-// - Keeps prior bundle behavior: colors anchored to STRICT; mode only affects how wide you cast the net; viewed resurfacing guard; debug line
+// app.js — Strict Job Search v3.2 (repo-ready)
+// FINAL+ : removes rules.txt everywhere, Save closes Settings (hard), dirty stack (json only)
 
 const $ = (id) => document.getElementById(id);
 
@@ -11,8 +8,8 @@ const state = {
   lever: [],
   custom: [],
   mode: "strict",
-  memory: {},     // jobId -> { viewed, rejected, appliedConfirmed, job }
-  rendered: {}    // jobId -> job (for current results view)
+  memory: {}, // jobId -> { viewed, rejected, appliedConfirmed, job }
+  rendered: {}, // jobId -> job (for current results view)
 };
 
 const MAX_RESULTS = 15;
@@ -38,7 +35,7 @@ function jobId(job) {
     (job.company || "").trim().toLowerCase(),
     (job.title || "").trim().toLowerCase(),
     (job.location || "").trim().toLowerCase(),
-    core
+    core,
   ].join("|");
   return btoa(unescape(encodeURIComponent(base))).slice(0, 64);
 }
@@ -76,31 +73,31 @@ function setSettingsVisible(isOpen) {
 }
 
 async function clearMemory() {
-  const explicitKeys = new Set([
-    MEMORY_KEY,
-    "greenhouse",
-    "lever",
-    "custom",
-    STAGED_RULES_KEY
-  ]);
+  const explicitKeys = new Set([MEMORY_KEY, "greenhouse", "lever", "custom", STAGED_RULES_KEY]);
 
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
       if (!k) continue;
       if (explicitKeys.has(k) || k.startsWith("sjs_")) {
-        try { localStorage.removeItem(k); } catch {}
+        try {
+          localStorage.removeItem(k);
+        } catch {}
       }
     }
   } catch {}
 
-  try { sessionStorage.clear(); } catch {}
+  try {
+    sessionStorage.clear();
+  } catch {}
 
   try {
     if ("caches" in window && window.caches?.keys) {
       const names = await window.caches.keys();
       for (const n of names) {
-        try { await window.caches.delete(n); } catch {}
+        try {
+          await window.caches.delete(n);
+        } catch {}
       }
     }
   } catch {}
@@ -109,7 +106,9 @@ async function clearMemory() {
     if ("serviceWorker" in navigator && navigator.serviceWorker?.getRegistrations) {
       const regs = await navigator.serviceWorker.getRegistrations();
       for (const r of regs) {
-        try { await r.unregister(); } catch {}
+        try {
+          await r.unregister();
+        } catch {}
       }
     }
   } catch {}
@@ -149,8 +148,12 @@ function downloadTextFile(filename, text) {
     a.click();
 
     setTimeout(() => {
-      try { URL.revokeObjectURL(url); } catch {}
-      try { a.remove(); } catch {}
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+      try {
+        a.remove();
+      } catch {}
     }, 0);
   } catch {}
 }
@@ -198,9 +201,7 @@ function copyToClipboard(text) {
 
 // ---------- Rules (durable + staged) ----------
 function getDurableRules() {
-  return Array.isArray(window.APP_STATE?.rules?.explicitRules)
-    ? window.APP_STATE.rules.explicitRules
-    : [];
+  return Array.isArray(window.APP_STATE?.rules?.explicitRules) ? window.APP_STATE.rules.explicitRules : [];
 }
 
 function loadStagedRulesFallback() {
@@ -214,7 +215,9 @@ function loadStagedRulesFallback() {
 }
 
 function saveStagedRulesFallback(arr) {
-  try { localStorage.setItem(STAGED_RULES_KEY, JSON.stringify(arr)); } catch {}
+  try {
+    localStorage.setItem(STAGED_RULES_KEY, JSON.stringify(arr));
+  } catch {}
 }
 
 function getStagedRules() {
@@ -230,9 +233,12 @@ function stageRule(rule) {
   const normalized = { type, value };
 
   const all = getDurableRules().concat(getStagedRules());
-  const exists = all.some(r =>
-    String(r?.type || "").toLowerCase() === normalized.type.toLowerCase() &&
-    String(r?.value || "").trim().toLowerCase() === normalized.value.toLowerCase()
+  const exists = all.some(
+    (r) =>
+      String(r?.type || "").toLowerCase() === normalized.type.toLowerCase() &&
+      String(r?.value || "")
+        .trim()
+        .toLowerCase() === normalized.value.toLowerCase()
   );
   if (exists) return;
 
@@ -303,19 +309,17 @@ function getExplicitRuleHits(job) {
 }
 
 // ---------- Minimal UI CSS (no styles.css change) ----------
+// NOTE: This injected CSS intentionally does NOT style the progress bar.
+// The progress bar gradient/animation is owned by styles.css.
 (function injectCSS() {
   if (document.getElementById("sjs-inline-css")) return;
   const style = document.createElement("style");
   style.id = "sjs-inline-css";
   style.textContent = `
     .bl-panel{ margin-top:10px; padding:10px; border-radius:12px; background:rgba(0,0,0,.20); border:1px solid rgba(255,255,255,.12); }
+    .bl-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .bl-row input[type="text"]{ flex:1; min-width:220px; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
     .bl-muted{ opacity:.82; font-size:12px; margin-bottom:8px; }
-    .bl-grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
-    .bl-item{ display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.12); }
-    .bl-item input{ width:18px; height:18px; margin-top:2px; }
-    .bl-item .meta{ display:flex; flex-direction:column; gap:6px; flex:1; }
-    .bl-item .label{ font-weight:800; letter-spacing:.2px; opacity:.95; text-transform:capitalize; }
-    .bl-item input[type="text"]{ width:100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
     .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
     .bl-actions .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
     .bl-actions .btn:hover{ background:rgba(255,255,255,.12); }
@@ -333,11 +337,6 @@ function getExplicitRuleHits(job) {
     .dirtyWrap .right{ display:flex; gap:10px; flex-wrap:wrap; }
     .dirtyWrap .btn{ padding:8px 10px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:rgba(255,255,255,.92); cursor:pointer; }
     .dirtyWrap .btn:hover{ background:rgba(255,255,255,.12); }
-
-    .sjs-statuswrap{ margin-top:12px; padding:12px; border-radius:14px; background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); }
-    .sjs-progress{ height:10px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.10); margin-top:10px; }
-    .sjs-progress > div{ height:100%; width:0%; background:rgba(80,200,255,.9); transition: width .2s ease; }
-    .sjs-note{ margin-top:8px; opacity:.85; font-size:12px; }
 
     .sjs-toast{
       position:fixed;
@@ -423,7 +422,7 @@ function parseSlugs(text) {
   return String(text || "")
     .replace(/\r/g, "\n")
     .split(/[\n,\t ]+/g)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 }
 
@@ -522,7 +521,7 @@ function rulesAsPromotePacket() {
   const staged = getStagedRules();
   return {
     version: String(base.version || "1"),
-    explicitRules: durable.concat(staged)
+    explicitRules: durable.concat(staged),
   };
 }
 
@@ -533,27 +532,36 @@ function downloadPromotePacket() {
 
 function copyPromoteJson() {
   const json = JSON.stringify(rulesAsPromotePacket(), null, 2);
-  copyToClipboard(json).then(() => {
-    toast("rules.json copied");
-  }).catch(() => {
-    ensureClipboardFallback(json);
-    toast("Clipboard blocked, fallback shown");
-  });
+  copyToClipboard(json)
+    .then(() => {
+      toast("rules.json copied");
+    })
+    .catch(() => {
+      ensureClipboardFallback(json);
+      toast("Clipboard blocked, fallback shown");
+    });
 }
 
 function sendMailPromotePacket() {
   const packet = rulesAsPromotePacket();
   const subject = `SJS PROMOTE PACKET — Dirty rules (${getStagedRules().length})`;
-  const body = `SUBJECT: ${subject}\n\n==== RULES.JSON BEGIN ====\n${JSON.stringify(packet, null, 2)}\n==== RULES.JSON END ====\n`;
+  const body = `SUBJECT: ${subject}\n\n==== RULES.JSON BEGIN ====\n${JSON.stringify(
+    packet,
+    null,
+    2
+  )}\n==== RULES.JSON END ====\n`;
 
-  copyToClipboard(body).then(() => {
-    toast("Promote packet copied");
-  }).catch(() => {
-    ensureClipboardFallback(body);
-    toast("Clipboard blocked, fallback shown");
-  }).finally(() => {
-    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  });
+  copyToClipboard(body)
+    .then(() => {
+      toast("Promote packet copied");
+    })
+    .catch(() => {
+      ensureClipboardFallback(body);
+      toast("Clipboard blocked, fallback shown");
+    })
+    .finally(() => {
+      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    });
 }
 
 // ---------- Filtering + Gates ----------
@@ -565,35 +573,90 @@ function shouldHide(job) {
 }
 
 const NON_US_LOCATION_TERMS = [
-  "canada", "toronto", "vancouver",
-  "united kingdom", "uk", "london", "ireland", "dublin",
-  "europe", "emea", "germany", "france", "spain", "netherlands", "amsterdam",
-  "sweden", "norway", "denmark", "finland",
-  "australia", "new zealand",
-  "singapore", "japan", "india", "bangalore", "gurugram", "hyderabad",
+  "canada",
+  "toronto",
+  "vancouver",
+  "united kingdom",
+  "uk",
+  "london",
+  "ireland",
+  "dublin",
+  "europe",
+  "emea",
+  "germany",
+  "france",
+  "spain",
+  "netherlands",
+  "amsterdam",
+  "sweden",
+  "norway",
+  "denmark",
+  "finland",
+  "australia",
+  "new zealand",
+  "singapore",
+  "japan",
+  "india",
+  "bangalore",
+  "gurugram",
+  "hyderabad",
   "south africa",
-  "brazil", "colombia", "chile",
-  "mexico", "latam"
+  "brazil",
+  "colombia",
+  "chile",
+  "mexico",
+  "latam",
 ];
 
-const AMBIGUOUS_OK_TERMS = [
-  "remote - us", "us remote", "remote (us)", "united states", "usa", "u.s."
-];
+const AMBIGUOUS_OK_TERMS = ["remote - us", "us remote", "remote (us)", "united states", "usa", "u.s."];
 
 const HARD_BACKEND_TERMS = [
-  "backend engineer", "back-end", "distributed systems", "microservices", "kubernetes",
-  "sre", "site reliability", "devops", "platform engineer", "infrastructure engineer",
-  "data engineer", "ml engineer", "machine learning engineer", "software engineer"
+  "backend engineer",
+  "back-end",
+  "distributed systems",
+  "microservices",
+  "kubernetes",
+  "sre",
+  "site reliability",
+  "devops",
+  "platform engineer",
+  "infrastructure engineer",
+  "data engineer",
+  "ml engineer",
+  "machine learning engineer",
+  "software engineer",
 ];
 
 const BACKEND_PRIMITIVES = [
-  "java", "golang", "c++", "rust", "kafka", "grpc", "k8s", "helm", "terraform",
-  "aws", "gcp", "azure", "postgres", "mysql", "redis"
+  "java",
+  "golang",
+  "c++",
+  "rust",
+  "kafka",
+  "grpc",
+  "k8s",
+  "helm",
+  "terraform",
+  "aws",
+  "gcp",
+  "azure",
+  "postgres",
+  "mysql",
+  "redis",
 ];
 
 const INFRA_OWNERSHIP = [
-  "on-call", "oncall", "pager", "incident", "latency", "throughput", "availability",
-  "sla", "slo", "slis", "runbook"
+  "on-call",
+  "oncall",
+  "pager",
+  "incident",
+  "latency",
+  "throughput",
+  "availability",
+  "sla",
+  "slo",
+  "slis",
+  "runbook",
 ];
 
 // STRICT positive gates + pipeline kill switch
@@ -606,7 +669,7 @@ const STRICT_KILL_TITLE_TERMS = [
   "pipeline",
   "evergreen",
   "open application",
-  "early career"
+  "early career",
 ];
 
 // Even if positives match, these should never be strict-green.
@@ -619,12 +682,11 @@ const STRICT_HARD_FAIL_TITLE_TERMS = [
   "accountant",
   "compensation",
   "federal systems integrator",
-  "systems integrator"
+  "systems integrator",
 ];
 
 // STRICT positives (must match at least one to be strict-green)
 const STRICT_POSITIVE_TERMS = [
-  // DevRel / advocacy
   "developer advocate",
   "developer relations",
   "devrel",
@@ -632,12 +694,10 @@ const STRICT_POSITIVE_TERMS = [
   "evangelist",
   "advocacy",
   "community",
-  // Support
   "developer support",
   "technical support",
   "customer support",
   "support engineer",
-  // Solutions / services
   "solutions consultant",
   "solution consultant",
   "solutions architect",
@@ -645,14 +705,13 @@ const STRICT_POSITIVE_TERMS = [
   "implementation",
   "professional services",
   "delivery",
-  // Content / docs / education
   "technical writer",
   "documentation",
   "content strategist",
   "content strategy",
   "education",
   "enablement",
-  "training"
+  "training",
 ];
 
 function countHits(text, arr) {
@@ -671,21 +730,21 @@ function excludeBackendInfraRole(text) {
 function shouldExcludeForLocation(geoTextRaw) {
   const geo = (geoTextRaw || "").toLowerCase().trim();
   if (!geo) return false;
-  if (AMBIGUOUS_OK_TERMS.some(t => geo.includes(t))) return false;
-  if (NON_US_LOCATION_TERMS.some(t => geo.includes(t))) return true;
+  if (AMBIGUOUS_OK_TERMS.some((t) => geo.includes(t))) return false;
+  if (NON_US_LOCATION_TERMS.some((t) => geo.includes(t))) return true;
   return false;
 }
 
 function strictHasPositiveSignal(textLower) {
-  return STRICT_POSITIVE_TERMS.some(t => textLower.includes(t));
+  return STRICT_POSITIVE_TERMS.some((t) => textLower.includes(t));
 }
 
 function strictKillSwitch(titleLower) {
-  return STRICT_KILL_TITLE_TERMS.some(t => titleLower.includes(t));
+  return STRICT_KILL_TITLE_TERMS.some((t) => titleLower.includes(t));
 }
 
 function strictHardFailTitle(titleLower) {
-  return STRICT_HARD_FAIL_TITLE_TERMS.some(t => titleLower.includes(t));
+  return STRICT_HARD_FAIL_TITLE_TERMS.some((t) => titleLower.includes(t));
 }
 
 function passesGates(job, relaxed = false) {
@@ -705,18 +764,12 @@ function passesGates(job, relaxed = false) {
   if (/accountable|own results|manage budget|p&l|audit|enforcement/.test(t)) return false;
 
   if (!relaxed) {
-    // STRICT pipeline kill switch
     if (strictKillSwitch(titleLower)) return false;
-
-    // STRICT hard-fail title terms (prevents "developer platform" product roles from ever going green)
     if (strictHardFailTitle(titleLower)) return false;
-
-    // STRICT positive gate (must match at least one)
     if (!strictHasPositiveSignal(t)) return false;
 
     if (/travel|offsite|retreat|onsite|hybrid|relocation/.test(t)) return false;
   } else {
-    // Relaxed stays broad, but still blocks onsite/hybrid/relocation
     if (/hybrid|onsite|on-site|relocation/.test(t)) return false;
   }
 
@@ -729,16 +782,17 @@ function getCandidateLeakHits(job) {
   const staged = getStagedRules();
 
   const keywordSet = new Set(
-    durable.concat(staged)
-      .filter(r => norm(r?.type) === "keyword")
-      .map(r => norm(r?.value))
+    durable
+      .concat(staged)
+      .filter((r) => norm(r?.type) === "keyword")
+      .map((r) => norm(r?.value))
       .filter(Boolean)
   );
 
   const titleRules = durable
-    .filter(r => norm(r?.type) === "title")
-    .map(r => String(r?.value || "").trim())
-    .filter(v => v.length >= 3);
+    .filter((r) => norm(r?.type) === "title")
+    .map((r) => String(r?.value || "").trim())
+    .filter((v) => v.length >= 3);
 
   const titleText = norm(job.title);
   const fullText = norm(job.title + " " + job.location + " " + job.description);
@@ -758,7 +812,7 @@ function getCandidateLeakHits(job) {
 function explainGatesFromTruth(job, relaxed = false) {
   const hits = getExplicitRuleHits(job);
   if (hits.length) {
-    return { pass: false, reasons: hits.map(h => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
+    return { pass: false, reasons: hits.map((h) => `Explicit ${h.type} hit (${h.source}): ${h.value}`) };
   }
 
   const titleLower = norm(job.title);
@@ -848,6 +902,7 @@ function buildWhyPanel(job, whyMeta) {
 
   body.textContent = lines.join("\n");
   panel.append(header, body);
+  panel.appendChild(body);
   return panel;
 }
 
@@ -855,7 +910,7 @@ function purgeRuleBlockedFromDOM() {
   const out = $("results");
   if (!out) return;
   const cards = out.querySelectorAll(".job[data-jobid]");
-  cards.forEach(card => {
+  cards.forEach((card) => {
     const id = card.getAttribute("data-jobid");
     const job = state.rendered[id];
     if (job && evaluateExplicitRules(job)) card.remove();
@@ -883,34 +938,33 @@ function buildBlacklistPanel(job, id, cardEl) {
 
   const intro = document.createElement("div");
   intro.className = "bl-muted";
-  intro.textContent = "Blacklist checklist. Pick any combination, edit values if needed, then Save once. Card disappears after Save.";
+  intro.textContent =
+    "Blacklist checklist. Pick any combination, edit values if needed, then Save once. Card disappears after Save.";
   panel.appendChild(intro);
 
   const grid = document.createElement("div");
-  grid.className = "bl-grid";
+  grid.className = "bl-row";
 
   function makeItem(type, labelText, defaultValue) {
-    const item = document.createElement("div");
-    item.className = "bl-item";
-
     const cb = document.createElement("input");
     cb.type = "checkbox";
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
-
-    const label = document.createElement("div");
-    label.className = "label";
-    label.textContent = labelText;
+    const label = document.createElement("span");
+    label.style.fontWeight = "800";
+    label.style.opacity = ".92";
+    label.textContent = labelText + ":";
 
     const input = document.createElement("input");
     input.type = "text";
     input.value = defaultValue || "";
 
-    meta.append(label, input);
-    item.append(cb, meta);
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "8px";
+    wrap.append(cb, label, input);
 
-    return { item, cb, input, type };
+    return { wrap, cb, input, type };
   }
 
   const itTitle = makeItem("title", "Title", job.title);
@@ -921,7 +975,7 @@ function buildBlacklistPanel(job, id, cardEl) {
   itTitle.cb.checked = true;
   itKeyword.cb.checked = true;
 
-  grid.append(itTitle.item, itKeyword.item, itLocation.item, itCompany.item);
+  grid.append(itTitle.wrap, itKeyword.wrap, itLocation.wrap, itCompany.wrap);
   panel.appendChild(grid);
 
   const actions = document.createElement("div");
@@ -931,7 +985,7 @@ function buildBlacklistPanel(job, id, cardEl) {
   saveBtn.className = "btn";
   saveBtn.textContent = "Save (stage + remove card)";
   saveBtn.onclick = () => {
-    const picks = [itTitle, itKeyword, itLocation, itCompany].filter(it => it.cb.checked);
+    const picks = [itTitle, itKeyword, itLocation, itCompany].filter((it) => it.cb.checked);
 
     if (!picks.length) {
       toast("No blacklist items selected");
@@ -994,15 +1048,11 @@ function renderJob(job) {
 
   const whyBtn = document.createElement("button");
   whyBtn.type = "button";
-  whyBtn.className = "why-btn " + (
-    whyMeta.status === "green" ? "why-green" :
-    whyMeta.status === "yellow" ? "why-yellow" : "why-red"
-  );
+  whyBtn.className =
+    "why-btn " +
+    (whyMeta.status === "green" ? "why-green" : whyMeta.status === "yellow" ? "why-yellow" : "why-red");
   whyBtn.setAttribute("aria-label", "Why");
-  whyBtn.title =
-    whyMeta.status === "green" ? "PASS (strict)" :
-    whyMeta.status === "yellow" ? "REJECT (review)" :
-    "REJECT";
+  whyBtn.title = whyMeta.status === "green" ? "PASS (strict)" : whyMeta.status === "yellow" ? "REJECT (review)" : "REJECT";
 
   const whyImg = document.createElement("img");
   whyImg.src = "WhyInfo.png";
@@ -1011,7 +1061,10 @@ function renderJob(job) {
 
   whyBtn.onclick = () => {
     const existing = div.querySelector(".why-panel");
-    if (existing) { existing.remove(); return; }
+    if (existing) {
+      existing.remove();
+      return;
+    }
     div.appendChild(buildWhyPanel(job, whyMeta));
   };
 
@@ -1075,7 +1128,10 @@ function renderJob(job) {
 
   blBtn.onclick = () => {
     const existing = div.querySelector(".bl-panel");
-    if (existing) { existing.remove(); return; }
+    if (existing) {
+      existing.remove();
+      return;
+    }
     div.appendChild(buildBlacklistPanel(job, id, div));
   };
 
@@ -1093,14 +1149,16 @@ async function fetchGreenhouse(token) {
     if (!r.ok) return [];
     const j = await r.json().catch(() => null);
     if (!j || !Array.isArray(j.jobs)) return [];
-    return j.jobs.map(x => ({
+    return j.jobs.map((x) => ({
       company: token,
       title: x?.title || "",
       location: x?.location?.name || "",
       description: x?.content || "",
-      url: x?.absolute_url || ""
+      url: x?.absolute_url || "",
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchLever(slug) {
@@ -1109,14 +1167,16 @@ async function fetchLever(slug) {
     if (!r.ok) return [];
     const j = await r.json().catch(() => null);
     if (!Array.isArray(j)) return [];
-    return j.map(x => ({
+    return j.map((x) => ({
       company: slug,
       title: x?.text || "",
       location: x?.categories?.location || "",
       description: x?.description || "",
-      url: x?.hostedUrl || ""
+      url: x?.hostedUrl || "",
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchCustom(url) {
@@ -1124,15 +1184,17 @@ async function fetchCustom(url) {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) return [];
     const j = await r.json().catch(() => null);
-    const jobs = Array.isArray(j) ? j : (j && Array.isArray(j.jobs) ? j.jobs : []);
-    return jobs.map(x => ({
+    const jobs = Array.isArray(j) ? j : j && Array.isArray(j.jobs) ? j.jobs : [];
+    return jobs.map((x) => ({
       company: x?.company || "custom",
       title: x?.title || "",
       location: x?.location || "",
       description: x?.description || "",
-      url: x?.url || ""
+      url: x?.url || "",
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 // ---------- Loading UI ----------
@@ -1140,6 +1202,7 @@ function ensureLoadingUI() {
   let statusWrap = document.getElementById("sjsStatusWrap");
   let progress = document.getElementById("sjsProgress");
   let note = document.getElementById("sjsNote");
+  let bar = document.getElementById("sjsProgressBar");
 
   if (!statusWrap) {
     statusWrap = document.createElement("div");
@@ -1163,7 +1226,7 @@ function ensureLoadingUI() {
     progress.className = "sjs-progress";
     progress.hidden = true;
 
-    const bar = document.createElement("div");
+    bar = document.createElement("div");
     bar.id = "sjsProgressBar";
     progress.appendChild(bar);
 
@@ -1183,7 +1246,7 @@ function ensureLoadingUI() {
     statusText: document.getElementById("sjsStatusText"),
     progress: document.getElementById("sjsProgress"),
     bar: document.getElementById("sjsProgressBar"),
-    note: document.getElementById("sjsNote")
+    note: document.getElementById("sjsNote"),
   };
 }
 
@@ -1238,7 +1301,9 @@ async function runSearch() {
   }
 
   const total = tasks.length;
-  let done = 0, skipped = 0, failed = 0;
+  let done = 0,
+    skipped = 0,
+    failed = 0;
   let jobs = [];
 
   const PER_SOURCE_TIMEOUT_MS = 12000;
@@ -1246,7 +1311,7 @@ async function runSearch() {
   setLoading(true, {
     statusText: `Searching sources (0/${total})...`,
     progressPct: 0,
-    noteText: `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length}`
+    noteText: `GH ${state.greenhouse.length} | Lever ${state.lever.length} | Custom ${state.custom.length}`,
   });
 
   let timeoutHandle = null;
@@ -1261,8 +1326,12 @@ async function runSearch() {
 
   function withTimeout(promise, ms) {
     let h = null;
-    const t = new Promise((_, reject) => { h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms); });
-    return Promise.race([promise, t]).finally(() => { if (h) clearTimeout(h); });
+    const t = new Promise((_, reject) => {
+      h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms);
+    });
+    return Promise.race([promise, t]).finally(() => {
+      if (h) clearTimeout(h);
+    });
   }
 
   const doSearch = (async () => {
@@ -1286,13 +1355,11 @@ async function runSearch() {
     }
 
     // Base pool: exclude explicit rules + applied/rejected
-    let candidates = jobs
-      .filter(j => !evaluateExplicitRules(j))
-      .filter(j => !shouldHide(j));
+    let candidates = jobs.filter((j) => !evaluateExplicitRules(j)).filter((j) => !shouldHide(j));
 
     // De-dupe by stable jobId
     const seen = new Set();
-    candidates = candidates.filter(j => {
+    candidates = candidates.filter((j) => {
       const id = jobId(j);
       if (seen.has(id)) return false;
       seen.add(id);
@@ -1308,10 +1375,10 @@ async function runSearch() {
     }
 
     // Viewed resurfacing guard
-    const newOnes = candidates.filter(j => !state.memory[jobId(j)]);
+    const newOnes = candidates.filter((j) => !state.memory[jobId(j)]);
     const enoughNew = newOnes.length >= MAX_RESULTS;
     if (enoughNew) {
-      candidates = candidates.filter(j => !isViewedUndecided(j));
+      candidates = candidates.filter((j) => !isViewedUndecided(j));
     }
 
     // Sorting: green first, then yellow, then red
@@ -1350,7 +1417,7 @@ async function runSearch() {
     setLoading(true, {
       statusText: "Done",
       progressPct: 100,
-      noteText: `Strict pass: ${strictPassCount} | Relaxed pass: ${relaxedPassCount} | Showing: ${showing.length}`
+      noteText: `Strict pass: ${strictPassCount} | Relaxed pass: ${relaxedPassCount} | Showing: ${showing.length}`,
     });
     setTimeout(() => setLoading(false), 1400);
 
@@ -1375,9 +1442,9 @@ function wireUI() {
   loadSources();
   loadMemory();
 
-  if ($("greenhouse")) $("greenhouse").value = (localStorage.getItem("greenhouse") || "");
-  if ($("lever")) $("lever").value = (localStorage.getItem("lever") || "");
-  if ($("custom")) $("custom").value = (localStorage.getItem("custom") || "");
+  if ($("greenhouse")) $("greenhouse").value = localStorage.getItem("greenhouse") || "";
+  if ($("lever")) $("lever").value = localStorage.getItem("lever") || "";
+  if ($("custom")) $("custom").value = localStorage.getItem("custom") || "";
 
   const strictBtn = $("modeStrict");
   const relaxedBtn = $("modeRelaxed");
@@ -1388,7 +1455,14 @@ function wireUI() {
   const runBtn = $("btnRun");
   if (runBtn) {
     runBtn.onclick = () => runSearch();
-    runBtn.addEventListener("click", (e) => { e.preventDefault(); runSearch(); }, true);
+    runBtn.addEventListener(
+      "click",
+      (e) => {
+        e.preventDefault();
+        runSearch();
+      },
+      true
+    );
   }
 
   const settingsBtn = $("btnSettings");
@@ -1417,9 +1491,17 @@ function wireUI() {
 (function bootNow() {
   if (document.readyState === "loading") {
     window.addEventListener("DOMContentLoaded", () => {
-      try { wireUI(); } catch (e) { console.error(e); }
+      try {
+        wireUI();
+      } catch (e) {
+        console.error(e);
+      }
     });
   } else {
-    try { wireUI(); } catch (e) { console.error(e); }
+    try {
+      wireUI();
+    } catch (e) {
+      console.error(e);
+    }
   }
 })();

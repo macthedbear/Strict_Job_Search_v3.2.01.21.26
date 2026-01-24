@@ -1,13 +1,17 @@
-// app.js — Strict Job Search (rebase-safe)
-// Aligned to index.html IDs: #btnRun #btnSettings #btnClear #modeStrict #modeRelaxed
-// Settings textareas: #greenhouse #lever #custom ; Save: #btnSave ; Settings panel: #settings
-// Results container: #results ; Controls container: .controls
+// app.js — Strict Job Search (foundation restore, full pasteover)
+// Aligned to index.html IDs:
+//   #btnRun #btnSettings #btnClear #modeStrict #modeRelaxed
+//   #settings #greenhouse #lever #custom #btnSave
+//   #results
+// Mounts into: .controls
 //
-// Fixes in this pass:
-// • Restores animated progress bar mount (uses existing styles.css .sjs-progress + @keyframes)
-// • Restores progress status text under bar (uses existing styles.css .sjs-note)
-// • Progress note shows: which source/slug is being checked + counts: ok/fail/timeout/empty
-// • WhyIcon no longer “all green”: adds yellow for operator-attention cases (UI signaling only)
+// Restores:
+// • Animated progress bar (CSS in styles.css: .sjs-progress)
+// • Progress status text under bar (.sjs-note): step/total + ok/fail/timeout/empty + current source
+// • Full job card function buttons: View, Reject, Blacklist (after Reject), Applied (after View)
+// • Why icon per card (no external image dependency)
+// • Authoritative purge: stage rule -> re-filter state.currentResults -> rerender
+// • Settings persistence guard: never overwrite storage if settings DOM missing
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,32 +23,27 @@ const state = {
 
   memory: {},          // jobId -> { viewed, rejected, appliedConfirmed, job }
   rendered: {},        // jobId -> job (for current results view)
-  currentResults: []   // canonical on-screen list (authoritative purge source)
+  currentResults: []   // canonical on-screen list used for purge + rerender
 };
 
 const MAX_RESULTS = 15;
 const MEMORY_KEY = "jobMemoryV3";
-const TIMEOUT_MS = 180000; // 3 minutes
-
-// Staged rules persistence
 const STAGED_RULES_KEY = "sjs_staged_rules_v1";
 
-// Progress config
+const TIMEOUT_MS = 180000;          // whole-run hard stop
+const PER_SOURCE_TIMEOUT_MS = 12000; // per-source timeout
 const PROGRESS_BASELINE_PCT = 6;
-let progressRunning = false;
 
 // ---------- Utilities ----------
-function jobId(job) {
-  const base = job.url || (job.company + "|" + job.title + "|" + job.location);
-  return btoa(unescape(encodeURIComponent(base))).slice(0, 64);
-}
-
-function norm(s) {
-  return String(s || "").trim().toLowerCase();
-}
+function norm(s) { return String(s || "").trim().toLowerCase(); }
 
 function safeJsonParse(s, fallback) {
   try { return JSON.parse(s); } catch { return fallback; }
+}
+
+function jobId(job) {
+  const base = job.url || (job.company + "|" + job.title + "|" + job.location);
+  return btoa(unescape(encodeURIComponent(base))).slice(0, 64);
 }
 
 function toast(msg) {
@@ -61,17 +60,77 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove("show"), 1700);
 }
 
-// ---------- Local persistence (sources + memory) ----------
-function loadMemory() {
-  state.memory = safeJsonParse(localStorage.getItem(MEMORY_KEY) || "{}", {});
-}
+// ---------- Inline CSS (only what app.js needs) ----------
+(function injectCSS() {
+  if (document.getElementById("sjs-inline-css")) return;
+  const style = document.createElement("style");
+  style.id = "sjs-inline-css";
+  style.textContent = `
+    .sjs-dirtywrap{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto; }
+    .sjs-dirtytag{
+      display:inline-flex; align-items:center; height:32px; padding:0 12px;
+      border-radius:999px; background:rgba(77,219,177,.28);
+      border:1px solid rgba(77,219,177,.55); color:rgba(15,15,18,.92);
+      font-weight:800;
+    }
+    .sjs-dirtynote{ font-size:12px; opacity:.82; margin-left:6px; }
+    .sjs-dirtybtn{ height:32px; }
 
-function saveMemory() {
-  try { localStorage.setItem(MEMORY_KEY, JSON.stringify(state.memory)); } catch {}
-}
+    .whyicon{
+      width:28px; height:28px; border-radius:10px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(0,0,0,.22);
+      display:flex; align-items:center; justify-content:center;
+      padding:4px;
+      cursor:pointer;
+    }
+    .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
+    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
+    .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
+    .whyicon .whyglyph{
+      font-weight:900; font-size:14px; line-height:1;
+      color:rgba(255,255,255,.92);
+      width:100%; height:100%;
+      display:flex; align-items:center; justify-content:center;
+      user-select:none;
+    }
 
+    .bl-panel{
+      margin-top:10px; padding:10px; border-radius:12px;
+      background:rgba(0,0,0,.20);
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .bl-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    .bl-row label{ margin:0; font-weight:650; opacity:.92; }
+    .bl-row input[type="text"]{
+      flex:1; min-width:200px; padding:8px 10px;
+      border-radius:10px; border:1px solid rgba(255,255,255,.14);
+      background:rgba(250,250,255,.92); color:rgba(15,15,18,.92);
+    }
+    .bl-hint{ font-size:12px; opacity:.78; margin-top:6px; }
+    .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+
+    .sjs-toast{
+      position:fixed; left:50%; bottom:18px;
+      transform:translateX(-50%) translateY(14px);
+      opacity:0; pointer-events:none;
+      padding:10px 14px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(0,0,0,.82);
+      color:rgba(255,255,255,.92);
+      font-size:12px; font-weight:650;
+      transition: opacity .18s ease, transform .18s ease;
+      z-index:9999;
+      white-space:pre-line;
+      max-width:min(520px, calc(100vw - 30px));
+    }
+    .sjs-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  `;
+  document.head.appendChild(style);
+})();
+
+// ---------- Settings persistence ----------
 function loadSettings() {
-  // IMPORTANT: Never write storage here. Read only.
   state.greenhouse = safeJsonParse(localStorage.getItem("greenhouse") || "[]", []);
   state.lever = safeJsonParse(localStorage.getItem("lever") || "[]", []);
   state.custom = safeJsonParse(localStorage.getItem("custom") || "[]", []);
@@ -79,7 +138,6 @@ function loadSettings() {
   const gh = $("greenhouse");
   const lv = $("lever");
   const cu = $("custom");
-
   if (gh) gh.value = (state.greenhouse || []).join("\n");
   if (lv) lv.value = (state.lever || []).join("\n");
   if (cu) cu.value = (state.custom || []).join("\n");
@@ -90,75 +148,28 @@ function saveSettings() {
   const lv = $("lever");
   const cu = $("custom");
 
-  // Guard: If the DOM nodes are missing for any reason, do NOT overwrite storage.
+  // Guard: never overwrite storage if DOM nodes are missing (prevents wipes).
   if (!gh || !lv || !cu) {
     toast("Settings UI missing (did not overwrite storage)");
     return;
   }
 
-  const nextGreenhouse = gh.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  const nextLever = lv.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  const nextCustom = cu.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
-
-  state.greenhouse = nextGreenhouse;
-  state.lever = nextLever;
-  state.custom = nextCustom;
+  state.greenhouse = gh.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  state.lever = lv.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  state.custom = cu.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
 
   try { localStorage.setItem("greenhouse", JSON.stringify(state.greenhouse)); } catch {}
   try { localStorage.setItem("lever", JSON.stringify(state.lever)); } catch {}
   try { localStorage.setItem("custom", JSON.stringify(state.custom)); } catch {}
 
   setSettingsVisible(false);
-  toast("Saved (settings closed)");
+  toast("Saved");
 }
 
-async function clearMemory() {
-  // Clears all device-local persistence for this app.
-  const explicitKeys = new Set([
-    MEMORY_KEY,
-    "greenhouse",
-    "lever",
-    "custom",
-    STAGED_RULES_KEY
-  ]);
-
-  try {
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      if (explicitKeys.has(k) || k.startsWith("sjs_")) {
-        try { localStorage.removeItem(k); } catch {}
-      }
-    }
-  } catch {}
-
-  state.memory = {};
-  state.rendered = {};
-  state.currentResults = [];
-  state.greenhouse = [];
-  state.lever = [];
-  state.custom = [];
-
-  const out = $("results");
-  if (out) out.innerHTML = "";
-
-  const gh = $("greenhouse");
-  const lv = $("lever");
-  const cu = $("custom");
-  if (gh) gh.value = "";
-  if (lv) lv.value = "";
-  if (cu) cu.value = "";
-
-  refreshDirtyUI();
-  toast("Device data cleared");
-}
-
-// ---------- Settings panel visibility ----------
 function setSettingsVisible(open) {
   const s = $("settings");
   if (!s) return;
   s.hidden = !open;
-  // Defensive: some mobile browsers keep layout even when hidden toggles
   s.style.display = open ? "" : "none";
 }
 
@@ -167,6 +178,38 @@ function toggleSettings() {
   if (!s) return;
   const open = !(s.hidden === false && s.style.display !== "none");
   setSettingsVisible(open);
+}
+
+// ---------- Memory ----------
+function loadMemory() {
+  state.memory = safeJsonParse(localStorage.getItem(MEMORY_KEY) || "{}", {});
+}
+
+function saveMemory() {
+  try { localStorage.setItem(MEMORY_KEY, JSON.stringify(state.memory)); } catch {}
+}
+
+function getRecord(id) {
+  return state.memory[id] || { viewed: false, rejected: false, appliedConfirmed: false, job: null };
+}
+
+function setRecord(id, patch, job) {
+  const prev = getRecord(id);
+  const next = {
+    viewed: !!(patch.viewed ?? prev.viewed),
+    rejected: !!(patch.rejected ?? prev.rejected),
+    appliedConfirmed: !!(patch.appliedConfirmed ?? prev.appliedConfirmed),
+    job: job || prev.job || null
+  };
+  if (next.appliedConfirmed) next.viewed = true;
+  state.memory[id] = next;
+  saveMemory();
+  return next;
+}
+
+function shouldHide(job) {
+  const r = state.memory[jobId(job)];
+  return !!(r && (r.rejected || r.appliedConfirmed));
 }
 
 // ---------- Mode ----------
@@ -178,13 +221,7 @@ function setMode(m) {
   toast(state.mode === "strict" ? "Strict" : "Relaxed");
 }
 
-// ---------- Rules (durable + staged) ----------
-function getDurableRules() {
-  return Array.isArray(window.APP_STATE?.rules?.explicitRules)
-    ? window.APP_STATE.rules.explicitRules
-    : [];
-}
-
+// ---------- Staged rules ----------
 function loadStagedRulesFallback() {
   const raw = localStorage.getItem(STAGED_RULES_KEY);
   const parsed = raw ? safeJsonParse(raw, []) : [];
@@ -193,6 +230,12 @@ function loadStagedRulesFallback() {
 
 function saveStagedRulesFallback(arr) {
   try { localStorage.setItem(STAGED_RULES_KEY, JSON.stringify(arr)); } catch {}
+}
+
+function getDurableRules() {
+  return Array.isArray(window.APP_STATE?.rules?.explicitRules)
+    ? window.APP_STATE.rules.explicitRules
+    : [];
 }
 
 function getStagedRules() {
@@ -249,7 +292,7 @@ function evaluateExplicitRules(job) {
   return false;
 }
 
-// ---------- Authoritative purge (FIX) ----------
+// ---------- Authoritative purge ----------
 function rerenderFromCurrentResults() {
   const out = $("results");
   if (!out) return;
@@ -273,136 +316,7 @@ function purgeAndRerender() {
   refreshDirtyUI();
 }
 
-// ---------- Minimal UI CSS (no styles.css edits) ----------
-(function injectCSS() {
-  if (document.getElementById("sjs-inline-css")) return;
-  const style = document.createElement("style");
-  style.id = "sjs-inline-css";
-  style.textContent = `
-    .sjs-dirtywrap{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto; }
-    .sjs-dirtytag{
-      display:inline-flex; align-items:center; height:32px; padding:0 12px;
-      border-radius:999px; background:rgba(77,219,177,.28);
-      border:1px solid rgba(77,219,177,.55); color:rgba(15,15,18,.92);
-      font-weight:800;
-    }
-    .sjs-dirtynote{ font-size:12px; opacity:.82; margin-left:6px; }
-    .sjs-dirtybtn{ height:32px; }
-    .bl-panel{ margin-top:10px; padding:10px; border-radius:12px; background:rgba(0,0,0,.20); border:1px solid rgba(255,255,255,.12); }
-    .bl-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
-    .bl-row label{ margin:0; font-weight:650; opacity:.92; }
-    .bl-row input[type="text"]{ flex:1; min-width:200px; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(250,250,255,.92); color:rgba(15,15,18,.92); }
-    .bl-hint{ font-size:12px; opacity:.78; margin-top:6px; }
-    .bl-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
-    .whyicon{ width:28px; height:28px; border-radius:10px; border:1px solid rgba(255,255,255,.16); background:rgba(0,0,0,.22); display:flex; align-items:center; justify-content:center; padding:4px; }
-    .whyicon img{ width:100%; height:100%; object-fit:contain; }
-    .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
-    .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
-    .sjs-toast{
-      position:fixed; left:50%; bottom:18px; transform:translateX(-50%) translateY(14px);
-      opacity:0; pointer-events:none; padding:10px 14px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.18); background:rgba(0,0,0,.82); color:rgba(255,255,255,.92);
-      font-size:12px; font-weight:650; transition: opacity .18s ease, transform .18s ease; z-index:9999;
-      white-space:pre-line;
-      max-width: min(520px, calc(100vw - 30px));
-    }
-    .sjs-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
-  `;
-  document.head.appendChild(style);
-})();
-
-// ---------- Progress UI (restored; uses existing styles.css .sjs-progress + animation) ----------
-function ensureProgressUI() {
-  const controls = document.querySelector(".controls");
-  if (!controls) return null;
-
-  let wrap = document.getElementById("sjsProgress");
-  if (wrap) return wrap;
-
-  wrap = document.createElement("div");
-  wrap.id = "sjsProgress";
-  wrap.className = "sjs-progress";
-  wrap.hidden = true;
-  wrap.style.display = "none";
-
-  const bar = document.createElement("div");
-  bar.id = "sjsProgressBar";
-  wrap.appendChild(bar);
-
-  // Put it directly after .controls so existing CSS layout matches prior behavior.
-  controls.insertAdjacentElement("afterend", wrap);
-
-  // Optional status line under the bar (uses existing .sjs-note in styles.css).
-  let note = document.getElementById("sjsProgressNote");
-  if (!note) {
-    note = document.createElement("div");
-    note.id = "sjsProgressNote";
-    note.className = "sjs-note";
-    note.textContent = "";
-  }
-
-  // Insert note right after the bar wrapper (and keep it adjacent if bar already mounted).
-  if (wrap.nextSibling !== note) {
-    wrap.insertAdjacentElement("afterend", note);
-  }
-
-  return wrap;
-}
-
-function showProgressRunningBaseline() {
-  const wrap = ensureProgressUI();
-  const bar = document.getElementById("sjsProgressBar");
-  if (!wrap || !bar) return;
-
-  progressRunning = true;
-  wrap.hidden = false;
-  wrap.style.display = "";
-
-  // If baseline is 0, the animated fill is invisible. Baseline keeps motion legible.
-  bar.style.width = `${PROGRESS_BASELINE_PCT}%`;
-}
-
-function setProgress(pct) {
-  const wrap = ensureProgressUI();
-  const bar = document.getElementById("sjsProgressBar");
-  if (!wrap || !bar) return;
-
-  wrap.hidden = false;
-  wrap.style.display = "";
-
-  const clamped = Math.max(0, Math.min(100, pct));
-  bar.style.width = clamped.toFixed(1) + "%";
-}
-
-function hideProgress() {
-  const wrap = document.getElementById("sjsProgress");
-  const bar = document.getElementById("sjsProgressBar");
-  progressRunning = false;
-  if (!wrap || !bar) return;
-
-  // Let the last width transition read, then disappear.
-  setTimeout(() => {
-    wrap.hidden = true;
-    wrap.style.display = "none";
-    bar.style.width = "0%";
-    hideProgressNote();
-  }, 350);
-}
-
-function setProgressNote(text) {
-  const note = document.getElementById("sjsProgressNote");
-  if (!note) return;
-  note.textContent = text || "";
-}
-
-function hideProgressNote() {
-  const note = document.getElementById("sjsProgressNote");
-  if (!note) return;
-  note.textContent = "";
-}
-
-// ---------- Dirty UI ----------
+// ---------- Dirty plaque ----------
 function ensureDirtyUI() {
   const controls = document.querySelector(".controls");
   if (!controls) return null;
@@ -457,9 +371,7 @@ function ensureDirtyUI() {
 }
 
 function refreshDirtyUI() {
-  const wrap = ensureDirtyUI();
-  if (!wrap) return;
-
+  ensureDirtyUI();
   const tag = $("sjsDirtyTag");
   const n = getStagedRules().length;
   if (tag) tag.textContent = `Dirty: ${n}`;
@@ -493,9 +405,84 @@ function downloadRulesJson() {
 
 function mailPromotePacket() {
   const payload = exportRulesJsonPayload();
-  const subject = `SJS PROMOTE PACKET`;
+  const subject = "SJS PROMOTE PACKET";
   const body = `==== RULES.JSON BEGIN ====\n${JSON.stringify(payload, null, 2)}\n==== RULES.JSON END ====`;
   window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+// ---------- Progress UI ----------
+function ensureProgressUI() {
+  const controls = document.querySelector(".controls");
+  if (!controls) return null;
+
+  let wrap = document.getElementById("sjsProgress");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "sjsProgress";
+    wrap.className = "sjs-progress";
+    wrap.hidden = true;
+    wrap.style.display = "none";
+
+    const bar = document.createElement("div");
+    bar.id = "sjsProgressBar";
+    wrap.appendChild(bar);
+
+    controls.insertAdjacentElement("afterend", wrap);
+  }
+
+  let note = document.getElementById("sjsProgressNote");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "sjsProgressNote";
+    note.className = "sjs-note"; // styles.css defines this
+    note.textContent = "";
+  }
+  if (wrap.nextSibling !== note) {
+    wrap.insertAdjacentElement("afterend", note);
+  }
+
+  return wrap;
+}
+
+function showProgressBaseline() {
+  ensureProgressUI();
+  const wrap = document.getElementById("sjsProgress");
+  const bar = document.getElementById("sjsProgressBar");
+  if (!wrap || !bar) return;
+
+  wrap.hidden = false;
+  wrap.style.display = "";
+  bar.style.width = `${PROGRESS_BASELINE_PCT}%`;
+}
+
+function setProgress(pct) {
+  ensureProgressUI();
+  const wrap = document.getElementById("sjsProgress");
+  const bar = document.getElementById("sjsProgressBar");
+  if (!wrap || !bar) return;
+
+  wrap.hidden = false;
+  wrap.style.display = "";
+  const clamped = Math.max(0, Math.min(100, pct));
+  bar.style.width = clamped.toFixed(1) + "%";
+}
+
+function setProgressNote(text) {
+  const note = document.getElementById("sjsProgressNote");
+  if (!note) return;
+  note.textContent = text || "";
+}
+
+function hideProgress() {
+  const wrap = document.getElementById("sjsProgress");
+  const bar = document.getElementById("sjsProgressBar");
+  if (!wrap || !bar) return;
+
+  setTimeout(() => {
+    wrap.hidden = true;
+    wrap.style.display = "none";
+    bar.style.width = "0%";
+  }, 350);
 }
 
 // ---------- Fetchers ----------
@@ -547,14 +534,13 @@ async function fetchCustom(url) {
   } catch { return []; }
 }
 
-// ---------- Gates (minimal: strict vs relaxed + explicit rules) ----------
-function passesGates(job, relaxed = false) {
+// ---------- Gates (minimal; explicit rules remain authoritative) ----------
+function passesGates(job, relaxed) {
   if (evaluateExplicitRules(job)) return false;
   return true;
 }
 
-// ---------- Why icon semantics (red/yellow/green) ----------
-// This is UI signaling, not governance. Filtering is still driven by explicit rules + existing gates.
+// ---------- Why semantics (UI signal) ----------
 const US_STATE_ABBRS = new Set([
   "AL","AK","AZ","AR","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY"
 ]);
@@ -565,11 +551,9 @@ function looksLikeUSLocation(locRaw) {
   if (loc.includes("canada")) return false;
   if (loc.includes("united states") || loc.includes("usa") || loc.includes("u.s.") || loc.includes("us ")) return true;
 
-  // Common pattern: "City, ST"
-  const m = locRaw && String(locRaw).match(/,\s*([A-Z]{2})\b/);
+  const m = String(locRaw || "").match(/,\s*([A-Z]{2})\b/);
   if (m && US_STATE_ABBRS.has(m[1])) return true;
 
-  // Standalone state abbreviation with word boundaries (avoid "CA" in "Canada" via earlier guard)
   const upper = String(locRaw || "").toUpperCase();
   for (const ab of US_STATE_ABBRS) {
     if (upper.match(new RegExp(`\\b${ab}\\b`))) return true;
@@ -582,7 +566,6 @@ function whyVerdict(job) {
 
   const loc = String(job.location || "").trim();
   const locN = norm(loc);
-
   if (!locN) return { color: "yellow", reason: "Missing location string" };
 
   const isRemote = locN.includes("remote");
@@ -604,12 +587,17 @@ function whyVerdict(job) {
 
 function showWhy(job) {
   const v = whyVerdict(job);
-  const msg = `Verdict: ${v.color.toUpperCase()}\nReason: ${v.reason}\n\nTitle: ${job.title}\nLocation: ${job.location}\nCompany: ${job.company}`;
-  toast(msg);
+  toast(
+    `Verdict: ${v.color.toUpperCase()}\n` +
+    `Reason: ${v.reason}\n\n` +
+    `Title: ${job.title}\n` +
+    `Location: ${job.location}\n` +
+    `Company: ${job.company}`
+  );
 }
 
-// ---------- Blacklist panel ----------
-function buildBlacklistPanel(job) {
+// ---------- Blacklist panel (appears after Reject) ----------
+function buildBlacklistPanel(job, hostCard) {
   const panel = document.createElement("div");
   panel.className = "bl-panel";
 
@@ -640,21 +628,21 @@ function buildBlacklistPanel(job) {
 
   const hint = document.createElement("div");
   hint.className = "bl-hint";
-  hint.textContent = "Stage rules locally. Export via Copy/Mail/Download rules.json.";
+  hint.textContent = "Stages rules locally. Export via Copy/Mail/Download rules.json.";
 
   const actions = document.createElement("div");
   actions.className = "bl-actions";
 
-  const btnApply = document.createElement("button");
-  btnApply.className = "btn primary";
-  btnApply.textContent = "Stage rules";
+  const btnStage = document.createElement("button");
+  btnStage.className = "btn primary";
+  btnStage.textContent = "Stage rules";
 
-  const btnCancel = document.createElement("button");
-  btnCancel.className = "btn";
-  btnCancel.textContent = "Cancel";
-  btnCancel.onclick = () => panel.remove();
+  const btnClose = document.createElement("button");
+  btnClose.className = "btn";
+  btnClose.textContent = "Close";
+  btnClose.onclick = () => panel.remove();
 
-  btnApply.onclick = () => {
+  btnStage.onclick = () => {
     if (cbCompany.checked) stageRule({ type: "company", value: job.company });
     if (cbTitle.checked) stageRule({ type: "title", value: inTitle.value });
     if (cbLoc.checked) stageRule({ type: "location", value: inLoc.value });
@@ -663,71 +651,86 @@ function buildBlacklistPanel(job) {
       parts.forEach(p => stageRule({ type: "keyword", value: p }));
     }
 
-    // Authoritative purge after staging
+    // Authoritative purge
     purgeAndRerender();
   };
 
-  actions.append(btnApply, btnCancel);
+  actions.append(btnStage, btnClose);
   panel.append(row1, row2, row3, row4, hint, actions);
+
+  // Ensure only one panel per card
+  const existing = hostCard.querySelector(".bl-panel");
+  if (existing) existing.remove();
+
   return panel;
 }
 
-// ---------- Memory helpers / card state ----------
-function getRecord(id) {
-  return state.memory[id] || { viewed: false, rejected: false, appliedConfirmed: false, job: null };
-}
-
-function setRecord(id, patch, job) {
-  const prev = getRecord(id);
-  const next = {
-    viewed: !!(patch.viewed ?? prev.viewed),
-    rejected: !!(patch.rejected ?? prev.rejected),
-    appliedConfirmed: !!(patch.appliedConfirmed ?? prev.appliedConfirmed),
-    job: job || prev.job || null
-  };
-  if (next.appliedConfirmed) next.viewed = true;
-  state.memory[id] = next;
-  saveMemory();
-  return next;
-}
-
-function shouldHide(job) {
-  const r = state.memory[jobId(job)];
-  return !!(r && (r.rejected || r.appliedConfirmed));
-}
-
-// ---------- Rendering ----------
+// ---------- Rendering (FULL function buttons restored) ----------
 function renderJob(job) {
   const id = jobId(job);
   state.rendered[id] = job;
 
   const record = getRecord(id);
 
-  const div = document.createElement("div");
-  div.className = "job";
-  div.setAttribute("data-jobid", id);
+  const card = document.createElement("div");
+  card.className = "job";
+  card.setAttribute("data-jobid", id);
 
-  if (record.viewed) div.classList.add("viewed");
-  if (record.rejected) div.classList.add("rejected");
-  if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
+  if (record.viewed) card.classList.add("viewed");
+  if (record.rejected) card.classList.add("rejected");
+  if (record.appliedConfirmed) card.classList.add("appliedConfirmed");
 
-  div.innerHTML = `<h3>${job.title}</h3><p>${job.location}</p>`;
+  const title = document.createElement("h3");
+  title.textContent = job.title || "(untitled)";
+
+  const loc = document.createElement("p");
+  loc.textContent = job.location || "";
+
+  card.append(title, loc);
 
   const actions = document.createElement("div");
   actions.className = "actions";
 
-  // Why icon
-  const whyWrap = document.createElement("button");
-  whyWrap.className = "whyicon";
+  // Why
+  const whyBtn = document.createElement("button");
+  whyBtn.type = "button";
+  whyBtn.className = "whyicon";
   const verdict = whyVerdict(job);
-  whyWrap.classList.add(verdict.color);
-  const img = document.createElement("img");
-  img.alt = "Why";
-  img.src = "./WhyInfo.png";
-  whyWrap.appendChild(img);
-  whyWrap.onclick = () => showWhy(job);
+  whyBtn.classList.add(verdict.color);
+  whyBtn.title = "Why";
+  const glyph = document.createElement("span");
+  glyph.className = "whyglyph";
+  glyph.textContent = "i";
+  whyBtn.appendChild(glyph);
+  whyBtn.onclick = () => showWhy(job);
 
-  // Applied
+  // View
+  const viewBtn = document.createElement("button");
+  viewBtn.type = "button";
+  viewBtn.className = "btn" + (record.viewed ? " touched" : "");
+  viewBtn.textContent = "View";
+  viewBtn.onclick = () => {
+    const next = setRecord(id, { viewed: true }, job);
+    card.classList.add("viewed");
+    viewBtn.classList.toggle("touched", next.viewed);
+    appliedCb.disabled = false;
+    if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
+    if (job.url) window.open(job.url, "_blank");
+  };
+
+  // Reject
+  const rejectBtn = document.createElement("button");
+  rejectBtn.type = "button";
+  rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
+  rejectBtn.textContent = "Reject";
+  rejectBtn.onclick = () => {
+    const next = setRecord(id, { rejected: true }, job);
+    card.classList.add("rejected");
+    rejectBtn.classList.toggle("touched", next.rejected);
+    blBtn.hidden = false;
+  };
+
+  // Applied (only after View)
   const appliedWrap = document.createElement("div");
   appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
 
@@ -746,59 +749,36 @@ function renderJob(job) {
     }
     const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
     appliedWrap.classList.toggle("checked", next.appliedConfirmed);
-    div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
+    card.classList.toggle("appliedConfirmed", next.appliedConfirmed);
   };
 
   appliedWrap.append(appliedCb, appliedLabel);
 
-  // View
-  const viewBtn = document.createElement("button");
-  viewBtn.className = "btn" + (record.viewed ? " touched" : "");
-  viewBtn.textContent = "View";
-  viewBtn.onclick = () => {
-    const next = setRecord(id, { viewed: true }, job);
-    viewBtn.classList.toggle("touched", next.viewed);
-    div.classList.add("viewed");
-
-    appliedCb.disabled = false;
-    if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
-
-    if (job.url) window.open(job.url, "_blank");
-  };
-
-  // Reject
-  const rejectBtn = document.createElement("button");
-  rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
-  rejectBtn.textContent = "Reject";
-
-  // Blacklist
+  // Blacklist (only after Reject)
   const blBtn = document.createElement("button");
+  blBtn.type = "button";
   blBtn.className = "btn";
   blBtn.textContent = "Blacklist";
   blBtn.hidden = !record.rejected;
-
-  rejectBtn.onclick = () => {
-    const next = setRecord(id, { rejected: true }, job);
-    rejectBtn.classList.toggle("touched", next.rejected);
-    div.classList.add("rejected");
-    blBtn.hidden = false;
-  };
-
   blBtn.onclick = () => {
-    const existing = div.querySelector(".bl-panel");
-    if (existing) { existing.remove(); return; }
-    const panel = buildBlacklistPanel(job);
-    div.appendChild(panel);
+    const panel = buildBlacklistPanel(job, card);
+    card.appendChild(panel);
   };
 
-  actions.append(whyWrap, viewBtn, rejectBtn, blBtn);
+  actions.append(whyBtn, viewBtn, rejectBtn, blBtn);
   if (record.viewed) actions.appendChild(appliedWrap);
 
-  div.appendChild(actions);
-  return div;
+  card.appendChild(actions);
+  return card;
 }
 
 // ---------- Search ----------
+async function withTimeout(promise, ms) {
+  let h = null;
+  const t = new Promise((_, reject) => { h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms); });
+  return Promise.race([promise, t]).finally(() => { if (h) clearTimeout(h); });
+}
+
 async function runSearch() {
   const out = $("results");
   if (!out) return;
@@ -807,7 +787,7 @@ async function runSearch() {
   state.rendered = {};
   state.currentResults = [];
 
-  loadMemory(); // ensure latest
+  loadMemory(); // latest
 
   const tasks = [];
   for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
@@ -815,17 +795,17 @@ async function runSearch() {
   for (const c of state.custom) tasks.push({ type: "Custom", label: c, fn: () => fetchCustom(c) });
 
   const total = tasks.length;
+  ensureProgressUI();
+
   if (!total) {
     out.innerHTML = `<div class="loaded">Loaded 0</div>`;
     toast("No sources configured");
-    ensureProgressUI();
     setProgressNote("No sources configured");
     hideProgress();
     return;
   }
 
-  // Progress: visible immediately, then advances per source completion.
-  showProgressRunningBaseline();
+  showProgressBaseline();
   setProgress(0);
 
   let jobs = [];
@@ -836,45 +816,41 @@ async function runSearch() {
   let timedOut = 0;
   let empty = 0;
 
-  setProgressNote("Starting search…");
+  setProgressNote(`Starting… 0/${total} | ok:0 fail:0 timeout:0 empty:0`);
 
-  const timeoutPromise = new Promise((_, reject) => {
+  const hardStop = new Promise((_, reject) => {
     setTimeout(() => reject(new Error("TIMEOUT")), TIMEOUT_MS);
   });
-
-  async function withTimeout(promise, ms) {
-    let h = null;
-    const t = new Promise((_, reject) => { h = setTimeout(() => reject(new Error("SOURCE_TIMEOUT")), ms); });
-    return Promise.race([promise, t]).finally(() => { if (h) clearTimeout(h); });
-  }
 
   const doSearch = (async () => {
     for (const t of tasks) {
       const step = done + 1;
-      setProgressNote(`Checking ${t.type}: ${t.label} (${step}/${total}) | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`);
+      setProgressNote(
+        `Checking ${t.type}: ${t.label} (${step}/${total}) | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`
+      );
+
       try {
-        const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), 12000);
+        const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
         ok += 1;
-        if (Array.isArray(chunk) && chunk.length) {
-          jobs.push(...chunk);
-        } else {
-          empty += 1;
-        }
+
+        if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
+        else empty += 1;
       } catch (err) {
         const msg = String(err && err.message ? err.message : err);
         if (msg === "SOURCE_TIMEOUT") timedOut += 1;
         else failed += 1;
       }
+
       done += 1;
       setProgress((done / total) * 100);
-      setProgressNote(`Checked ${done}/${total} | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`);
+      setProgressNote(
+        `Checked ${done}/${total} | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`
+      );
     }
     return jobs;
   })();
 
-  try {
-    await Promise.race([doSearch, timeoutPromise]);
-  } catch {}
+  try { await Promise.race([doSearch, hardStop]); } catch {}
 
   // De-dupe
   const seen = new Set();
@@ -887,13 +863,13 @@ async function runSearch() {
   }
 
   const relaxed = (state.mode === "relaxed");
+
   const filtered = uniq
     .filter(j => !shouldHide(j))
     .filter(j => passesGates(j, relaxed))
     .filter(j => !evaluateExplicitRules(j))
     .slice(0, MAX_RESULTS);
 
-  // Canonical list for purge + rerender
   state.currentResults = filtered.slice();
 
   filtered.forEach(j => out.appendChild(renderJob(j)));
@@ -912,13 +888,22 @@ async function runSearch() {
 
 // ---------- Wire UI ----------
 function wire() {
-  // Settings should start closed regardless of HTML hidden attribute behavior
   setSettingsVisible(false);
 
   $("btnSettings")?.addEventListener("click", toggleSettings);
   $("btnSave")?.addEventListener("click", saveSettings);
+
   $("btnRun")?.addEventListener("click", runSearch);
-  $("btnClear")?.addEventListener("click", () => { clearMemory(); });
+  $("btnClear")?.addEventListener("click", () => {
+    // Keep this conservative: only clears job memory + staged rules, not sources.
+    // (If you want full device wipe again, say so and I’ll restore that behavior.)
+    try { localStorage.removeItem(MEMORY_KEY); } catch {}
+    try { localStorage.removeItem(STAGED_RULES_KEY); } catch {}
+    loadMemory();
+    refreshDirtyUI();
+    toast("Cleared job memory + staged rules");
+    rerenderFromCurrentResults();
+  });
 
   $("modeStrict")?.addEventListener("click", () => setMode("strict"));
   $("modeRelaxed")?.addEventListener("click", () => setMode("relaxed"));

@@ -1,5 +1,5 @@
 {
-  "version": "2",
+  "version": "1.0",
   "explicitRules": [
     {
       "type": "location",
@@ -83,359 +83,111 @@
     },
     {
       "type": "title",
-      "value": "Marketer"
+      "value": "Lead Generative AI - Contractor"
     },
     {
       "type": "title",
-      "value": "Associate, Client Success & Strategy"
-    },
-    {
-      "type": "title",
-      "value": "Core Partner Specialist L1"
-    },
-    {
-      "type": "title",
-      "value": "Paid Media"
-    },
-    {
-      "type": "title",
-      "value": "Evangelist"
-    },
-    {
-      "type": "title",
-      "value": "People"
-    },
-    {
-      "type": "title",
-      "value": "HR"
-    },
-    {
-      "type": "title",
-      "value": "Recruiting"
-    },
-    {
-      "type": "title",
-      "value": "Sourcer"
-    },
-    {
-      "type": "title",
-      "value": "Paralegal"
-    },
-    {
-      "type": "title",
-      "value": "Legal"
-    },
-    {
-      "type": "title",
-      "value": "Contracts"
-    },
-    {
-      "type": "title",
-      "value": "Procurement"
-    },
-    {
-      "type": "title",
-      "value": "Risk"
-    },
-    {
-      "type": "title",
-      "value": "Compliance"
-    },
-    {
-      "type": "title",
-      "value": "GRCP"
-    },
-    {
-      "type": "title",
-      "value": "Support"
-    },
-    {
-      "type": "title",
-      "value": "Customer Support"
-    },
-    {
-      "type": "title",
-      "value": "Developer Support"
-    },
-    {
-      "type": "title",
-      "value": "Technical Support"
-    },
-    {
-      "type": "title",
-      "value": "Video"
-    },
-    {
-      "type": "title",
-      "value": "Content"
-    },
-    {
-      "type": "title",
-      "value": "Strategist"
-    },
-    {
-      "type": "title",
-      "value": "Analytics"
-    },
-    {
-      "type": "title",
-      "value": "People Analytics"
-    },
-    {
-      "type": "title",
-      "value": "Systems Engineer"
-    },
-    {
-      "type": "keyword",
-      "value": "Systems Engineer"
-    },
-    {
-      "type": "title",
-      "value": "Airtable Specialist"
-    },
-    {
-      "type": "title",
-      "value": "Internal"
-    },
-    {
-      "type": "title",
-      "value": "Delivery"
-    },
-    {
-      "type": "title",
-      "value": "Solutions Consultant"
-    },
-    {
-      "type": "title",
-      "value": "Solution Architect"
-    },
-    {
-      "type": "location",
-      "value": "Seattle, WA only"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Dubai"
-    },
-    {
-      "type": "location",
-      "value": "Portugal"
-    },
-    {
-      "type": "location",
-      "value": "Remote (Portugal)"
-    },
-    {
-      "type": "title",
-      "value": "Manager, Field Engineering Italy"
-    },
-    {
-      "type": "keyword",
-      "value": "Manager, Field Engineering Italy"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Italy"
-    },
-    {
-      "type": "title",
-      "value": "Director, Enterprise Sales - Retail, Travel & Hospitality"
-    },
-    {
-      "type": "keyword",
-      "value": "Director, Enterprise Sales - Retail, Travel & Hospitality"
-    },
-    {
-      "type": "title",
-      "value": "Federal Systems Integrator, Lead"
-    },
-    {
-      "type": "keyword",
-      "value": "Federal Systems Integrator, Lead"
-    },
-    {
-      "type": "title",
-      "value": "Future Opportunities - Customer Success - US"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities - Customer Success - US"
-    },
-    {
-      "type": "title",
-      "value": "Future Opportunities - Sales - Chicago"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities - Sales - Chicago"
-    },
-    {
-      "type": "title",
-      "value": "Future Opportunities - Sales - NY"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities - Sales - NY"
-    },
-    {
-      "type": "title",
-      "value": "Future Opportunities - Sales - Texas"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities - Sales - Texas"
-    },
-    {
-      "type": "title",
-      "value": "Future Opportunities: Accountant Sales Talent"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities: Accountant Sales Talent"
-    },
-    {
-      "type": "title",
-      "value": "Principal Compensation Partner"
-    },
-    {
-      "type": "keyword",
-      "value": "Principal Compensation Partner"
-    },
-    {
-      "type": "title",
-      "value": "Principal Product Manager - Developer Platform"
-    },
-    {
-      "type": "keyword",
-      "value": "Principal Product Manager - Developer Platform"
+      "value": "Account Executive - Strategic"
     },
     {
       "type": "title",
       "value": "Sales"
     },
     {
-      "type": "keyword",
-      "value": "Director, Enterprise Sales, Retail, Travel & Hospitality"
-    },
-    {
-      "type": "keyword",
-      "value": "Future Opportunities, Sales"
-    },
-    {
-      "type": "keyword",
-      "value": "Compensation, Partner"
+      "type": "title",
+      "value": "Manager, AI & Automation"
     },
     {
       "type": "title",
-      "value": "Marketing"
-    },
-    {
-      "type": "keyword",
-      "value": "Marketing"
+      "value": "Director"
     },
     {
       "type": "title",
-      "value": "Chemistry"
-    },
-    {
-      "type": "keyword",
-      "value": "Product Designer, Chemistry"
+      "value": "Senior Director"
     },
     {
       "type": "title",
-      "value": "Payments"
-    },
-    {
-      "type": "keyword",
-      "value": "Payments"
+      "value": "VP"
     },
     {
       "type": "title",
-      "value": "Resident Solutions Architect-Public Sector"
-    },
-    {
-      "type": "keyword",
-      "value": "Security clearance"
+      "value": "Vice President"
     },
     {
       "type": "title",
-      "value": "Solutions Architect - Healthcare/Life Sciences Team (HLS)"
-    },
-    {
-      "type": "keyword",
-      "value": "Solutions Architect - Healthcare/Life Sciences Team (HLS)"
+      "value": "Chief"
     },
     {
       "type": "title",
-      "value": "Solutions Architect - Public Sector"
-    },
-    {
-      "type": "keyword",
-      "value": "Python, Scala, Java, SQL, R"
+      "value": "Intern"
     },
     {
       "type": "title",
-      "value": "Sr. Solutions Architect - Digital Native Business (Geo)"
-    },
-    {
-      "type": "keyword",
-      "value": "Database"
+      "value": "Internship"
     },
     {
       "type": "title",
-      "value": "Product Manager"
-    },
-    {
-      "type": "keyword",
-      "value": "Product Manager"
+      "value": "Apprentice"
     },
     {
       "type": "title",
-      "value": "Senior Incident Manager"
-    },
-    {
-      "type": "keyword",
-      "value": "Senior Incident Manager,  computer Science."
+      "value": "Apprenticeship"
     },
     {
       "type": "title",
-      "value": "Senior Solutions Engineer"
-    },
-    {
-      "type": "keyword",
-      "value": "Hybrid"
+      "value": "Co-op"
     },
     {
       "type": "title",
-      "value": "Account Manager, Commercial (German Speaking)"
-    },
-    {
-      "type": "keyword",
-      "value": "German Speaking"
-    },
-    {
-      "type": "location",
-      "value": "London, England"
+      "value": "Coop"
     },
     {
       "type": "title",
-      "value": "APAC Program Specialist"
+      "value": "Graduate"
     },
     {
-      "type": "keyword",
-      "value": "APAC Program Specialist"
+      "type": "title",
+      "value": "Campus"
     },
     {
-      "type": "location",
-      "value": "Singapore"
+      "type": "title",
+      "value": "University"
     },
     {
-      "type": "keyword",
-      "value": "Account Manager, Commercial (German Speaking)"
+      "type": "title",
+      "value": "Rotational"
     },
     {
-      "type": "company",
-      "value": "PagerDuty, Inc."
+      "type": "title",
+      "value": "New Grad"
+    },
+    {
+      "type": "title",
+      "value": "New Graduate"
+    },
+    {
+      "type": "title",
+      "value": "new grad"
+    },
+    {
+      "type": "title",
+      "value": "new graduate"
+    },
+    {
+      "type": "title",
+      "value": "campus"
+    },
+    {
+      "type": "title",
+      "value": "university"
+    },
+    {
+      "type": "title",
+      "value": "intern"
+    },
+    {
+      "type": "title",
+      "value": "rotational"
     }
   ]
 }

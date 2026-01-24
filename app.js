@@ -1,5 +1,6 @@
 // app.js — Strict Job Search v3.2 (repo-ready)
 // FINAL+ : removes rules.txt everywhere, Save closes Settings (hard), dirty stack (json only)
+// FIX: blacklist purge is now authoritative (re-filter + re-render), so Korea/Dublin/BizOps purge instantly.
 
 const $ = (id) => document.getElementById(id);
 
@@ -8,8 +9,9 @@ const state = {
   lever: [],
   custom: [],
   mode: "strict",
-  memory: {},     // jobId -> { viewed, rejected, appliedConfirmed, job }
-  rendered: {}    // jobId -> job (for current results view)
+  memory: {},       // jobId -> { viewed, rejected, appliedConfirmed, job }
+  rendered: {},     // jobId -> job (for current results view)
+  currentResults: [] // canonical on-screen list for purge + rerender
 };
 
 const MAX_RESULTS = 15;
@@ -65,6 +67,7 @@ function clearMemory() {
   localStorage.removeItem(STAGED_RULES_KEY);
   state.memory = {};
   state.rendered = {};
+  state.currentResults = [];
   refreshDirtyUI();
   toast("Memory cleared");
   const out = $("results");
@@ -179,7 +182,7 @@ function stageRule(rule) {
   const all = getDurableRules().concat(getStagedRules());
   const exists = all.some(r =>
     String(r?.type || "").toLowerCase() === normalized.type.toLowerCase() &&
-    String(r?.value || "").trim().toLowerCase() === normalized.value.toLowerCase()
+    String(r?.value || "").trim().toLowerCase() === normalized.value.trim().toLowerCase()
   );
   if (exists) return;
 
@@ -200,8 +203,7 @@ function stageRule(rule) {
 
 function evaluateExplicitRules(job) {
   // Contract: location rules must match what the user sees in the Location line on the card.
-  // In this app, that is job.location (a single composed string). If it contains the blacklisted
-  // phrase, the job is blocked in BOTH Strict and Relaxed.
+  // In this app, that is job.location (a single composed string).
   const rules = getDurableRules().concat(getStagedRules());
 
   const comp = norm(job.company);
@@ -223,15 +225,32 @@ function evaluateExplicitRules(job) {
   return false;
 }
 
-function purgeRuleBlockedFromDOM() {
+// ---------- Authoritative Purge + Rerender (FIX) ----------
+function rerenderFromCurrentResults() {
   const out = $("results");
   if (!out) return;
-  const cards = out.querySelectorAll(".job[data-jobid]");
-  cards.forEach(card => {
-    const id = card.getAttribute("data-jobid");
-    const job = state.rendered[id];
-    if (job && evaluateExplicitRules(job)) card.remove();
-  });
+
+  out.innerHTML = "";
+  state.rendered = {};
+
+  const filtered = (state.currentResults || []).filter(j => !evaluateExplicitRules(j));
+  state.currentResults = filtered;
+
+  for (const job of filtered) {
+    out.appendChild(renderJob(job));
+  }
+
+  const loaded = document.createElement("div");
+  loaded.className = "loaded";
+  loaded.textContent = `Loaded ${filtered.length}`;
+  out.appendChild(loaded);
+}
+
+function purgeAndRerender() {
+  // This is the foundation contract: after staging a blacklist rule,
+  // anything visible that matches must be removed immediately.
+  rerenderFromCurrentResults();
+  refreshDirtyUI();
 }
 
 // ---------- Minimal UI CSS (no styles.css change) ----------
@@ -252,13 +271,11 @@ function purgeRuleBlockedFromDOM() {
     .sjs-dirtywrap{ margin-top:10px; padding:10px; border-radius:16px; background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.12); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .sjs-dirtytag{ font-weight:800; opacity:.95; }
     .sjs-dirtynote{ font-size:12px; opacity:.8; }
-    .sjs-dirtybtn{ }
     .whyicon{ width:26px; height:26px; border-radius:10px; border:1px solid rgba(255,255,255,.16); background:rgba(0,0,0,.22); display:flex; align-items:center; justify-content:center; padding:4px; }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
     .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
-    .whytoast{ white-space:pre-wrap; }
   `;
   document.head.appendChild(style);
 })();
@@ -419,7 +436,6 @@ function passesGates(job, relaxed = false) {
   // strict inclusion: must match at least one allow signal
   if (!relaxed && !hasAllowSignal(job)) return false;
 
-  // relaxed is permissive; strict is not
   return true;
 }
 
@@ -433,7 +449,6 @@ function whyVerdict(job) {
     return { color: "red", reason: "Future Opportunities kill-switch" };
   }
 
-  // Strict pass = green; strict fail but not hard exclude = yellow
   const strictPass = passesGates(job, false);
   if (strictPass) return { color: "green", reason: "Passes Strict gates" };
   return { color: "yellow", reason: "Does not pass Strict gates (inspect why)" };
@@ -473,8 +488,6 @@ function refreshDirtyUI() {
   if (btnCopy) btnCopy.hidden = (n <= 0);
   if (btnMail) btnMail.hidden = (n <= 0);
   if (btnDlJson) btnDlJson.hidden = (n <= 0);
-
-  if (n > 0) purgeRuleBlockedFromDOM();
 }
 
 function getRulesJsonPayload() {
@@ -561,8 +574,9 @@ function buildBlacklistPanel(job, id, cardDiv) {
       const parts = (inKw.value || "").split(",").map(s => s.trim()).filter(Boolean);
       parts.forEach(p => stageRule({ type: "keyword", value: p }));
     }
-    purgeRuleBlockedFromDOM();
-    cardDiv.remove();
+
+    // FIX: authoritative purge (not DOM-only)
+    purgeAndRerender();
   };
 
   actions.append(btnApply, btnCancel);
@@ -593,12 +607,6 @@ function shouldHide(job) {
   const r = state.memory[jobId(job)] || null;
   if (!r) return false;
   return !!(r.rejected || r.appliedConfirmed);
-}
-function isNewHit(job) { return !state.memory[jobId(job)]; }
-function isViewedUndecided(job) {
-  const r = state.memory[jobId(job)] || null;
-  if (!r) return false;
-  return !!(r.viewed && !r.rejected && !r.appliedConfirmed);
 }
 
 function renderJob(job) {
@@ -706,6 +714,7 @@ async function runSearch() {
   hardStopAllLoaders();
   out.innerHTML = "";
   state.rendered = {};
+  state.currentResults = [];
 
   loadMemory();
 
@@ -786,14 +795,16 @@ async function runSearch() {
     .filter(j => passesGates(j, relaxed))
     .slice(0, MAX_RESULTS);
 
+  // Canonical current results for purge + rerender
+  state.currentResults = filtered.slice();
+
   filtered.forEach(j => out.appendChild(renderJob(j)));
 
   setLoading(false, {});
 
-  const count = filtered.length;
   const loaded = document.createElement("div");
   loaded.className = "loaded";
-  loaded.textContent = `Loaded ${count}`;
+  loaded.textContent = `Loaded ${filtered.length}`;
   out.appendChild(loaded);
 
   refreshDirtyUI();

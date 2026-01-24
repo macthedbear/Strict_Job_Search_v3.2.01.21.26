@@ -1,24 +1,74 @@
 {
   "version": "2",
   "explicitRules": [
-    { "type": "location", "value": "Canada" },
-    { "type": "location", "value": "United Kingdom" },
-    { "type": "location", "value": "UK" },
-    { "type": "location", "value": "Remote - Netherlands" },
-    { "type": "location", "value": "Remote - Ireland" },
-    { "type": "location", "value": "Remote - United Kingdom" },
-    { "type": "location", "value": "Remote - Colombia" },
-    { "type": "location", "value": "Remote - Germany" },
-    { "type": "location", "value": "Remote - France" },
-    { "type": "location", "value": "Remote - Spain" },
-    { "type": "location", "value": "Remote - Australia" },
-    { "type": "location", "value": "Dublin, Ireland" },
-
-    { "type": "title", "value": "Account Executive" },
-    { "type": "title", "value": "Account Executive, Corporate - UKI" },
-    { "type": "title", "value": "Senior Software Engineer - Backend Remote Assistance" },
-    { "type": "title", "value": "Product Consultant" },
-    { "type": "title", "value": "AI Subject Matter Experts (Freelance / Remote)" },
+    {
+      "type": "location",
+      "value": "Canada"
+    },
+    {
+      "type": "location",
+      "value": "United Kingdom"
+    },
+    {
+      "type": "location",
+      "value": "UK"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Netherlands"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Ireland"
+    },
+    {
+      "type": "location",
+      "value": "Remote - United Kingdom"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Colombia"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Germany"
+    },
+    {
+      "type": "location",
+      "value": "Remote - France"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Spain"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Australia"
+    },
+    {
+      "type": "location",
+      "value": "Dublin, Ireland"
+    },
+    {
+      "type": "title",
+      "value": "Account Executive"
+    },
+    {
+      "type": "title",
+      "value": "Account Executive, Corporate - UKI"
+    },
+    {
+      "type": "title",
+      "value": "Senior Software Engineer - Backend Remote Assistance"
+    },
+    {
+      "type": "title",
+      "value": "Product Consultant"
+    },
+    {
+      "type": "title",
+      "value": "AI Subject Matter Experts (Freelance / Remote)"
+    },
     {
       "type": "title",
       "value": "External Contractor - Mentor role for Flying Car and Autonomous Flight Engineer track"
@@ -27,39 +77,365 @@
       "type": "title",
       "value": "External Contractor - Mentor role for Sensor Fusion Engineer track"
     },
-    { "type": "title", "value": "Nanodegree" },
-    { "type": "title", "value": "Marketer" },
-    { "type": "title", "value": "Associate, Client Success & Strategy" },
-    { "type": "title", "value": "Core Partner Specialist L1" },
-    { "type": "title", "value": "Paid Media" },
-
-    { "type": "title", "value": "Evangelist" },
-    { "type": "title", "value": "People" },
-    { "type": "title", "value": "HR" },
-    { "type": "title", "value": "Recruiting" },
-    { "type": "title", "value": "Sourcer" },
-    { "type": "title", "value": "Paralegal" },
-    { "type": "title", "value": "Legal" },
-    { "type": "title", "value": "Contracts" },
-    { "type": "title", "value": "Procurement" },
-    { "type": "title", "value": "Risk" },
-    { "type": "title", "value": "Compliance" },
-    { "type": "title", "value": "GRCP" },
-    { "type": "title", "value": "Support" },
-    { "type": "title", "value": "Customer Support" },
-    { "type": "title", "value": "Developer Support" },
-    { "type": "title", "value": "Technical Support" },
-    { "type": "title", "value": "Video" },
-    { "type": "title", "value": "Content" },
-    { "type": "title", "value": "Strategist" },
-    { "type": "title", "value": "Analytics" },
-    { "type": "title", "value": "People Analytics" },
-    { "type": "title", "value": "Systems Engineer" },
-    { "type": "keyword", "value": "Systems Engineer" },
-    { "type": "title", "value": "Airtable Specialist" },
-    { "type": "title", "value": "Internal" },
-    { "type": "title", "value": "Delivery" },
-    { "type": "title", "value": "Solutions Consultant" },
-    { "type": "title", "value": "Solution Architect" }
+    {
+      "type": "title",
+      "value": "Nanodegree"
+    },
+    {
+      "type": "title",
+      "value": "Marketer"
+    },
+    {
+      "type": "title",
+      "value": "Associate, Client Success & Strategy"
+    },
+    {
+      "type": "title",
+      "value": "Core Partner Specialist L1"
+    },
+    {
+      "type": "title",
+      "value": "Paid Media"
+    },
+    {
+      "type": "title",
+      "value": "Evangelist"
+    },
+    {
+      "type": "title",
+      "value": "People"
+    },
+    {
+      "type": "title",
+      "value": "HR"
+    },
+    {
+      "type": "title",
+      "value": "Recruiting"
+    },
+    {
+      "type": "title",
+      "value": "Sourcer"
+    },
+    {
+      "type": "title",
+      "value": "Paralegal"
+    },
+    {
+      "type": "title",
+      "value": "Legal"
+    },
+    {
+      "type": "title",
+      "value": "Contracts"
+    },
+    {
+      "type": "title",
+      "value": "Procurement"
+    },
+    {
+      "type": "title",
+      "value": "Risk"
+    },
+    {
+      "type": "title",
+      "value": "Compliance"
+    },
+    {
+      "type": "title",
+      "value": "GRCP"
+    },
+    {
+      "type": "title",
+      "value": "Support"
+    },
+    {
+      "type": "title",
+      "value": "Customer Support"
+    },
+    {
+      "type": "title",
+      "value": "Developer Support"
+    },
+    {
+      "type": "title",
+      "value": "Technical Support"
+    },
+    {
+      "type": "title",
+      "value": "Video"
+    },
+    {
+      "type": "title",
+      "value": "Content"
+    },
+    {
+      "type": "title",
+      "value": "Strategist"
+    },
+    {
+      "type": "title",
+      "value": "Analytics"
+    },
+    {
+      "type": "title",
+      "value": "People Analytics"
+    },
+    {
+      "type": "title",
+      "value": "Systems Engineer"
+    },
+    {
+      "type": "keyword",
+      "value": "Systems Engineer"
+    },
+    {
+      "type": "title",
+      "value": "Airtable Specialist"
+    },
+    {
+      "type": "title",
+      "value": "Internal"
+    },
+    {
+      "type": "title",
+      "value": "Delivery"
+    },
+    {
+      "type": "title",
+      "value": "Solutions Consultant"
+    },
+    {
+      "type": "title",
+      "value": "Solution Architect"
+    },
+    {
+      "type": "location",
+      "value": "Seattle, WA only"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Dubai"
+    },
+    {
+      "type": "location",
+      "value": "Portugal"
+    },
+    {
+      "type": "location",
+      "value": "Remote (Portugal)"
+    },
+    {
+      "type": "title",
+      "value": "Manager, Field Engineering Italy"
+    },
+    {
+      "type": "keyword",
+      "value": "Manager, Field Engineering Italy"
+    },
+    {
+      "type": "location",
+      "value": "Remote - Italy"
+    },
+    {
+      "type": "title",
+      "value": "Director, Enterprise Sales - Retail, Travel & Hospitality"
+    },
+    {
+      "type": "keyword",
+      "value": "Director, Enterprise Sales - Retail, Travel & Hospitality"
+    },
+    {
+      "type": "title",
+      "value": "Federal Systems Integrator, Lead"
+    },
+    {
+      "type": "keyword",
+      "value": "Federal Systems Integrator, Lead"
+    },
+    {
+      "type": "title",
+      "value": "Future Opportunities - Customer Success - US"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities - Customer Success - US"
+    },
+    {
+      "type": "title",
+      "value": "Future Opportunities - Sales - Chicago"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities - Sales - Chicago"
+    },
+    {
+      "type": "title",
+      "value": "Future Opportunities - Sales - NY"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities - Sales - NY"
+    },
+    {
+      "type": "title",
+      "value": "Future Opportunities - Sales - Texas"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities - Sales - Texas"
+    },
+    {
+      "type": "title",
+      "value": "Future Opportunities: Accountant Sales Talent"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities: Accountant Sales Talent"
+    },
+    {
+      "type": "title",
+      "value": "Principal Compensation Partner"
+    },
+    {
+      "type": "keyword",
+      "value": "Principal Compensation Partner"
+    },
+    {
+      "type": "title",
+      "value": "Principal Product Manager - Developer Platform"
+    },
+    {
+      "type": "keyword",
+      "value": "Principal Product Manager - Developer Platform"
+    },
+    {
+      "type": "title",
+      "value": "Sales"
+    },
+    {
+      "type": "keyword",
+      "value": "Director, Enterprise Sales, Retail, Travel & Hospitality"
+    },
+    {
+      "type": "keyword",
+      "value": "Future Opportunities, Sales"
+    },
+    {
+      "type": "keyword",
+      "value": "Compensation, Partner"
+    },
+    {
+      "type": "title",
+      "value": "Marketing"
+    },
+    {
+      "type": "keyword",
+      "value": "Marketing"
+    },
+    {
+      "type": "title",
+      "value": "Chemistry"
+    },
+    {
+      "type": "keyword",
+      "value": "Product Designer, Chemistry"
+    },
+    {
+      "type": "title",
+      "value": "Payments"
+    },
+    {
+      "type": "keyword",
+      "value": "Payments"
+    },
+    {
+      "type": "title",
+      "value": "Resident Solutions Architect-Public Sector"
+    },
+    {
+      "type": "keyword",
+      "value": "Security clearance"
+    },
+    {
+      "type": "title",
+      "value": "Solutions Architect - Healthcare/Life Sciences Team (HLS)"
+    },
+    {
+      "type": "keyword",
+      "value": "Solutions Architect - Healthcare/Life Sciences Team (HLS)"
+    },
+    {
+      "type": "title",
+      "value": "Solutions Architect - Public Sector"
+    },
+    {
+      "type": "keyword",
+      "value": "Python, Scala, Java, SQL, R"
+    },
+    {
+      "type": "title",
+      "value": "Sr. Solutions Architect - Digital Native Business (Geo)"
+    },
+    {
+      "type": "keyword",
+      "value": "Database"
+    },
+    {
+      "type": "title",
+      "value": "Product Manager"
+    },
+    {
+      "type": "keyword",
+      "value": "Product Manager"
+    },
+    {
+      "type": "title",
+      "value": "Senior Incident Manager"
+    },
+    {
+      "type": "keyword",
+      "value": "Senior Incident Manager,  computer Science."
+    },
+    {
+      "type": "title",
+      "value": "Senior Solutions Engineer"
+    },
+    {
+      "type": "keyword",
+      "value": "Hybrid"
+    },
+    {
+      "type": "title",
+      "value": "Account Manager, Commercial (German Speaking)"
+    },
+    {
+      "type": "keyword",
+      "value": "German Speaking"
+    },
+    {
+      "type": "location",
+      "value": "London, England"
+    },
+    {
+      "type": "title",
+      "value": "APAC Program Specialist"
+    },
+    {
+      "type": "keyword",
+      "value": "APAC Program Specialist"
+    },
+    {
+      "type": "location",
+      "value": "Singapore"
+    },
+    {
+      "type": "keyword",
+      "value": "Account Manager, Commercial (German Speaking)"
+    },
+    {
+      "type": "company",
+      "value": "PagerDuty, Inc."
+    }
   ]
 }

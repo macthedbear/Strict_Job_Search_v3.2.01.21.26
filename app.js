@@ -7,7 +7,7 @@
 // 1) Settings persistence no longer gets wiped on reload.
 // 2) Dirty plaque always mounts (no missing anchor).
 // 3) Blacklist purge is authoritative: re-filter + re-render (Korea/Dublin/BizOps purge instantly).
-// 4) Removes Download rules.txt UI entirely (no lies).
+// 4) Restores progress indicator semantics (animated + teal→blue convergence) in app.js, no CSS edits.
 
 const $ = (id) => document.getElementById(id);
 
@@ -154,7 +154,6 @@ function setSettingsVisible(open) {
   const s = $("settings");
   if (!s) return;
   s.hidden = !open;
-  // Defensive: some mobile browsers keep layout even when hidden toggles
   s.style.display = open ? "" : "none";
 }
 
@@ -239,13 +238,13 @@ function evaluateExplicitRules(job) {
 
     if (rt === "company" && comp === rv) return true;
     if (rt === "title" && title.includes(rv)) return true;
-    if (rt === "location" && loc.includes(rv)) return true;     // single field: location line
+    if (rt === "location" && loc.includes(rv)) return true;
     if (rt === "keyword" && text.includes(rv)) return true;
   }
   return false;
 }
 
-// ---------- Authoritative purge (FIX) ----------
+// ---------- Authoritative purge ----------
 function rerenderFromCurrentResults() {
   const out = $("results");
   if (!out) return;
@@ -305,6 +304,130 @@ function purgeAndRerender() {
   `;
   document.head.appendChild(style);
 })();
+
+// ---------- Progress UI (semantic + animated, restored in app.js) ----------
+function hexToRgb(hex) {
+  const h = String(hex || "").replace("#", "").trim();
+  if (h.length !== 6) return { r: 0, g: 0, b: 0 };
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16)
+  };
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function mixHex(aHex, bHex, t) {
+  const a = hexToRgb(aHex);
+  const b = hexToRgb(bHex);
+  const r = Math.round(lerp(a.r, b.r, t));
+  const g = Math.round(lerp(a.g, b.g, t));
+  const b2 = Math.round(lerp(a.b, b.b, t));
+  return `rgb(${r}, ${g}, ${b2})`;
+}
+
+function ensureProgressUI() {
+  const controls = document.querySelector(".controls");
+  if (!controls) return null;
+
+  let wrap = document.getElementById("sjsProgress");
+  if (wrap) return wrap;
+
+  wrap = document.createElement("div");
+  wrap.id = "sjsProgress";
+  wrap.className = "sjs-progress";
+  wrap.hidden = true;
+
+  const bar = document.createElement("div");
+  bar.id = "sjsProgressBar";
+  wrap.appendChild(bar);
+
+  // Put it in the same place your CSS expects: after controls, before results
+  controls.parentElement?.insertBefore(wrap, controls.nextSibling);
+
+  // IMPORTANT: reassert animation from JS (app.js owns the operator signal).
+  // CSS already defines @keyframes sjsGradientShift, we just guarantee it's engaged.
+  bar.style.animation = "sjsGradientShift 1.4s linear infinite";
+  bar.style.backgroundSize = "220% 100%";
+
+  return wrap;
+}
+
+function setProgressRunning(on) {
+  ensureProgressUI();
+  const bar = document.getElementById("sjsProgressBar");
+  if (!bar) return;
+
+  // If a browser ever “optimizes away” animation, restarting it makes motion explicit.
+  if (on) {
+    bar.style.animation = "none";
+    // force reflow
+    void bar.offsetHeight;
+    bar.style.animation = "sjsGradientShift 1.4s linear infinite";
+  } else {
+    // leave animation alone; hideProgress handles disappearance
+  }
+}
+
+function applySemanticGradient(pct) {
+  const bar = document.getElementById("sjsProgressBar");
+  if (!bar) return;
+
+  // Semantic intent:
+  // early = teal-dominant (uncertain / in-flight)
+  // late  = blue-dominant (settling / nearing completion)
+  const t = Math.max(0, Math.min(1, pct / 100));
+
+  const TEAL = "#4DDBB1";
+  const BLUE = "#3FA9F5";
+
+  // Drift toward blue as completion increases.
+  const lead = mixHex(TEAL, BLUE, Math.min(1, t * 0.95));
+  const mid = mixHex(TEAL, BLUE, Math.min(1, t * 1.15));
+  const tail = mixHex(TEAL, BLUE, Math.min(1, t * 0.75));
+
+  // Use a repeating-ish gradient so shifting background-position reads as motion.
+  bar.style.background = `linear-gradient(90deg,
+    ${lead},
+    ${mid},
+    ${tail},
+    ${mid},
+    ${lead}
+  )`;
+
+  // Subtle confidence glow: stronger as it converges
+  const glow = 0.20 + (0.22 * t);
+  bar.style.boxShadow = `0 0 18px rgba(63,169,245,${glow.toFixed(3)})`;
+}
+
+function setProgress(pct) {
+  ensureProgressUI();
+  const wrap = document.getElementById("sjsProgress");
+  const bar = document.getElementById("sjsProgressBar");
+  if (!wrap || !bar) return;
+
+  wrap.hidden = false;
+  wrap.style.display = "";
+
+  const clamped = Math.max(0, Math.min(100, pct));
+  bar.style.width = clamped.toFixed(1) + "%";
+
+  // Restore semantic color shift in app.js.
+  applySemanticGradient(clamped);
+}
+
+function hideProgress() {
+  const wrap = document.getElementById("sjsProgress");
+  const bar = document.getElementById("sjsProgressBar");
+  if (!wrap || !bar) return;
+
+  setTimeout(() => {
+    wrap.hidden = true;
+    wrap.style.display = "none";
+    bar.style.width = "0%";
+  }, 350);
+}
 
 // ---------- Dirty UI ----------
 function ensureDirtyUI() {
@@ -375,7 +498,6 @@ function refreshDirtyUI() {
 }
 
 function exportRulesJsonPayload() {
-  // Versioning can be adjusted later; no threshold work in this pass.
   const durable = window.APP_STATE?.rules || { version: "1", explicitRules: [] };
   const staged = getStagedRules() || [];
   return {
@@ -452,19 +574,15 @@ async function fetchCustom(url) {
   } catch { return []; }
 }
 
-// ---------- Gates (minimal: strict vs relaxed + explicit rules) ----------
+// ---------- Gates ----------
 function passesGates(job, relaxed = false) {
   if (evaluateExplicitRules(job)) return false;
-  // No new gate logic in this fix. Existing behavior: relaxed shows more, strict shows fewer.
-  // If your repo has additional gate logic in index.js, it can still run independently.
   return true;
 }
 
-// ---------- Why icon semantics (red/yellow/green) ----------
+// ---------- Why icon semantics ----------
 function whyVerdict(job) {
   if (evaluateExplicitRules(job)) return { color: "red", reason: "Explicit rule hit" };
-  // Yellow/Green are placeholders tied to your existing strict logic.
-  // If you add strict positive gates, hook them here later.
   return { color: "green", reason: "No explicit rule hit" };
 }
 
@@ -529,7 +647,6 @@ function buildBlacklistPanel(job) {
       parts.forEach(p => stageRule({ type: "keyword", value: p }));
     }
 
-    // Authoritative purge after staging
     purgeAndRerender();
   };
 
@@ -582,7 +699,6 @@ function renderJob(job) {
   const actions = document.createElement("div");
   actions.className = "actions";
 
-  // Why icon
   const whyWrap = document.createElement("button");
   whyWrap.className = "whyicon";
   const verdict = whyVerdict(job);
@@ -593,7 +709,6 @@ function renderJob(job) {
   whyWrap.appendChild(img);
   whyWrap.onclick = () => showWhy(job);
 
-  // Applied
   const appliedWrap = document.createElement("div");
   appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
 
@@ -617,7 +732,6 @@ function renderJob(job) {
 
   appliedWrap.append(appliedCb, appliedLabel);
 
-  // View
   const viewBtn = document.createElement("button");
   viewBtn.className = "btn" + (record.viewed ? " touched" : "");
   viewBtn.textContent = "View";
@@ -632,12 +746,10 @@ function renderJob(job) {
     if (job.url) window.open(job.url, "_blank");
   };
 
-  // Reject
   const rejectBtn = document.createElement("button");
   rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
   rejectBtn.textContent = "Reject";
 
-  // Blacklist
   const blBtn = document.createElement("button");
   blBtn.className = "btn";
   blBtn.textContent = "Blacklist";
@@ -673,17 +785,24 @@ async function runSearch() {
   state.rendered = {};
   state.currentResults = [];
 
-  loadMemory(); // ensure latest
+  loadMemory();
 
   const tasks = [];
-  for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
-  for (const l of state.lever) tasks.push({ type: "Lever", label: l, fn: () => fetchLever(l) });
-  for (const c of state.custom) tasks.push({ type: "Custom", label: c, fn: () => fetchCustom(c) });
+  for (const g of state.greenhouse) tasks.push({ fn: () => fetchGreenhouse(g) });
+  for (const l of state.lever) tasks.push({ fn: () => fetchLever(l) });
+  for (const c of state.custom) tasks.push({ fn: () => fetchCustom(c) });
 
   const total = tasks.length;
+
+  // Progress: show immediately + force motion even at 0%
+  setProgress(0);
+  setProgressRunning(true);
+
   if (!total) {
     out.innerHTML = `<div class="loaded">Loaded 0</div>`;
     toast("No sources configured");
+    setProgressRunning(false);
+    hideProgress();
     return;
   }
 
@@ -707,6 +826,7 @@ async function runSearch() {
         if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
       } catch {}
       done += 1;
+      setProgress((done / total) * 100);
     }
     return jobs;
   })();
@@ -732,7 +852,6 @@ async function runSearch() {
     .filter(j => !evaluateExplicitRules(j))
     .slice(0, MAX_RESULTS);
 
-  // Canonical list for purge + rerender
   state.currentResults = filtered.slice();
 
   filtered.forEach(j => out.appendChild(renderJob(j)));
@@ -743,11 +862,14 @@ async function runSearch() {
   out.appendChild(loaded);
 
   refreshDirtyUI();
+
+  setProgress(100);
+  setProgressRunning(false);
+  hideProgress();
 }
 
 // ---------- Wire UI ----------
 function wire() {
-  // Settings should start closed regardless of HTML hidden attribute behavior
   setSettingsVisible(false);
 
   $("btnSettings")?.addEventListener("click", toggleSettings);
@@ -760,6 +882,7 @@ function wire() {
 
   loadSettings();
   loadMemory();
+  ensureProgressUI();
   ensureDirtyUI();
   refreshDirtyUI();
 }

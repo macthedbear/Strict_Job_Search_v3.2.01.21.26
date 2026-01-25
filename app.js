@@ -129,9 +129,48 @@ async function ensureDurableRulesLoaded() {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.70); }
+    .whyicon.yellow{ box-shadow:none; }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
+
+    /* WHY PANEL (persistent) */
+    #sjsWhyOverlay{
+      position:fixed; inset:0; z-index:10000;
+      display:flex; align-items:center; justify-content:center;
+      padding:18px;
+    }
+    #sjsWhyBackdrop{
+      position:absolute; inset:0;
+      background:rgba(0,0,0,.58);
+    }
+    #sjsWhyPanel{
+      position:relative;
+      width:min(560px, calc(100vw - 36px));
+      max-height:min(72vh, 520px);
+      overflow:auto;
+      border-radius:14px;
+      background:rgba(0,0,0,.90);
+      color:rgba(255,255,255,.92);
+      border:1px solid rgba(255,255,255,.18);
+      padding:14px 14px 12px;
+      box-shadow:0 10px 32px rgba(0,0,0,.35);
+      white-space:pre-line;
+      font-size:13px;
+      line-height:1.35;
+    }
+    #sjsWhyClose{
+      position:sticky;
+      top:0;
+      float:right;
+      margin:-2px 0 8px 8px;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);
+      color:rgba(255,255,255,.92);
+      font-weight:700;
+      cursor:pointer;
+    }
 
     .bl-panel{
       margin-top:10px; padding:10px; border-radius:12px;
@@ -166,6 +205,44 @@ async function ensureDurableRulesLoaded() {
   `;
   document.head.appendChild(style);
 })();
+
+// ---------- Why Panel (persistent, closes on request) ----------
+function closeWhyPanel() {
+  const ov = document.getElementById("sjsWhyOverlay");
+  if (ov) ov.remove();
+}
+
+function openWhyPanel(text) {
+  // Replace any existing overlay
+  closeWhyPanel();
+
+  const overlay = document.createElement("div");
+  overlay.id = "sjsWhyOverlay";
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "sjsWhyBackdrop";
+  backdrop.addEventListener("click", closeWhyPanel);
+
+  const panel = document.createElement("div");
+  panel.id = "sjsWhyPanel";
+
+  const btn = document.createElement("button");
+  btn.id = "sjsWhyClose";
+  btn.type = "button";
+  btn.textContent = "Close";
+  btn.addEventListener("click", closeWhyPanel);
+
+  const body = document.createElement("div");
+  body.textContent = text;
+
+  panel.appendChild(btn);
+  panel.appendChild(body);
+
+  overlay.appendChild(backdrop);
+  overlay.appendChild(panel);
+
+  document.body.appendChild(overlay);
+}
 
 // ---------- Progress UI (run semantics) ----------
 function ensureProgressUI() {
@@ -664,13 +741,13 @@ function whyVerdict(job) {
 
 function showWhy(job) {
   const v = whyVerdict(job);
-  toast(
+  const text =
     `Verdict: ${v.color.toUpperCase()}\n` +
     `Reason: ${v.reason}\n\n` +
     `Title: ${job.title}\n` +
     `Location: ${job.location}\n` +
-    `Company: ${job.company}`
-  );
+    `Source: ${job.company}`;
+  openWhyPanel(text);
 }
 
 // ---------- Rendering ----------

@@ -129,7 +129,7 @@ async function ensureDurableRulesLoaded() {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
+    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.85), 0 0 14px rgba(255,215,90,.65), 0 0 28px rgba(255,215,90,.35); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
 
@@ -409,7 +409,7 @@ function ensureDirtyUI() {
   const note = document.createElement("span");
   note.id = "sjsDirtyNote";
   note.className = "sjs-dirtynote";
-  note.textContent = "Staged rules (local)";
+  note.textContent = "Local until promoted";
 
   tag.appendChild(note);
 
@@ -482,7 +482,6 @@ function ensureDirtyUI() {
     const text = JSON.stringify(payload, null, 2);
 
     const subject = "Strict Job Search — staged rules export";
-    // Best-effort size guard for mailto bodies
     const body = text.length > 14000
       ? (text.slice(0, 14000) + "\n\n[TRUNCATED: copy/download for full payload]")
       : text;
@@ -511,7 +510,6 @@ function buildRulesExportPayload() {
   return {
     ...base,
     explicitRules: baseExplicit.concat(staged),
-    // Marking as local export (not promoted) without changing durable rules.
     stagedNotPromoted: true,
     exportedAt: new Date().toISOString()
   };
@@ -525,20 +523,34 @@ function refreshDirtyUI() {
   const dirtyCount = Array.isArray(staged) ? staged.length : 0;
 
   const tag = document.getElementById("sjsDirtyTag");
+  const note = document.getElementById("sjsDirtyNote");
   const btnCopy = document.getElementById("sjsDirtyCopy");
   const btnMail = document.getElementById("sjsDirtyMail");
   const btnDownload = document.getElementById("sjsDirtyDownload");
+
+  if (note) note.textContent = "Local until promoted";
 
   if (tag) tag.firstChild
     ? (tag.childNodes[0].nodeValue = `Dirty: ${dirtyCount}`)
     : (tag.textContent = `Dirty: ${dirtyCount}`);
 
-  const show = dirtyCount > 0;
-  wrap.style.display = show ? "" : "none";
+  // Plaque is always visible; actions appear only when dirty > 0
+  wrap.style.display = "";
 
-  if (btnCopy) btnCopy.disabled = !show;
-  if (btnMail) btnMail.disabled = !show;
-  if (btnDownload) btnDownload.disabled = !show;
+  const showActions = dirtyCount > 0;
+
+  if (btnCopy) {
+    btnCopy.disabled = !showActions;
+    btnCopy.style.display = showActions ? "" : "none";
+  }
+  if (btnMail) {
+    btnMail.disabled = !showActions;
+    btnMail.style.display = showActions ? "" : "none";
+  }
+  if (btnDownload) {
+    btnDownload.disabled = !showActions;
+    btnDownload.style.display = showActions ? "" : "none";
+  }
 }
 
 // ---------- Gates ----------
@@ -754,7 +766,6 @@ async function runSearch() {
   const out = $("results");
   if (!out) return;
 
-  // Initialize UI semantics for this run
   refreshDirtyUI();
   setRunUI({ show: true, status: "Starting search…", pct: PROGRESS_BASELINE_PCT, note: "Preparing sources and rules" });
 

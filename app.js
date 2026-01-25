@@ -129,7 +129,7 @@ async function ensureDurableRulesLoaded() {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.85), 0 0 14px rgba(255,215,90,.65), 0 0 28px rgba(255,215,90,.35); }
+    .whyicon.yellow{ box-shadow:none; }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
 
@@ -534,7 +534,6 @@ function refreshDirtyUI() {
     ? (tag.childNodes[0].nodeValue = `Dirty: ${dirtyCount}`)
     : (tag.textContent = `Dirty: ${dirtyCount}`);
 
-  // Plaque is always visible; actions appear only when dirty > 0
   wrap.style.display = "";
 
   const showActions = dirtyCount > 0;
@@ -769,7 +768,8 @@ async function runSearch() {
   refreshDirtyUI();
   setRunUI({ show: true, status: "Starting search…", pct: PROGRESS_BASELINE_PCT, note: "Preparing sources and rules" });
 
-  await Promise.race([awaitRulesReady(1500), ensureDurableRulesLoaded()]);
+  const ready = await awaitRulesReady(1500);
+  if (!ready) await ensureDurableRulesLoaded();
 
   out.innerHTML = "";
   state.rendered = {};
@@ -784,11 +784,17 @@ async function runSearch() {
   if (!tasks.length) {
     out.innerHTML = `<div class="loaded">Loaded 0</div>`;
     setRunUI({ show: true, status: "Complete: Loaded 0", pct: 100, note: "No sources configured" });
+    setTimeout(() => setRunUI({ show: false }), 1200);
     toast("No sources configured");
     return;
   }
 
   let jobs = [];
+  let jobsFetchedTotal = 0;
+  let sourcesOk = 0;
+  let sourcesTimeout = 0;
+  let sourcesFailed = 0;
+
   const total = tasks.length;
   const span = 100 - PROGRESS_BASELINE_PCT;
 
@@ -805,8 +811,11 @@ async function runSearch() {
 
     try {
       const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
+      sourcesOk += 1;
+
       if (Array.isArray(chunk) && chunk.length) {
         jobs.push(...chunk);
+        jobsFetchedTotal += chunk.length;
         setRunUI({
           show: true,
           status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
@@ -822,6 +831,9 @@ async function runSearch() {
         });
       }
     } catch (e) {
+      if (e && e.message === "SOURCE_TIMEOUT") sourcesTimeout += 1;
+      else sourcesFailed += 1;
+
       setRunUI({
         show: true,
         status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
@@ -864,7 +876,18 @@ async function runSearch() {
   loaded.textContent = `Loaded ${ranked.length}`;
   out.appendChild(loaded);
 
-  setRunUI({ show: true, status: `Complete: Loaded ${ranked.length}`, pct: 100, note: "Run finished" });
+  const summary = document.createElement("div");
+  summary.className = "sjs-runSummary";
+  summary.textContent = `Sources: ok ${sourcesOk}, timeouts ${sourcesTimeout}, failed ${sourcesFailed} | Jobs fetched: ${jobsFetchedTotal} | Loaded: ${ranked.length}`;
+  out.appendChild(summary);
+
+  setRunUI({
+    show: true,
+    status: `Complete: Loaded ${ranked.length} (ok ${sourcesOk}, t/o ${sourcesTimeout}, failed ${sourcesFailed})`,
+    pct: 100,
+    note: "Run finished"
+  });
+  setTimeout(() => setRunUI({ show: false }), 1200);
 }
 
 // ---------- Fetchers ----------

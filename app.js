@@ -71,6 +71,44 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove("show"), 1700);
 }
 
+// ---------- Why Panel (persistent) ----------
+function closeWhyPanel() {
+  const ov = document.getElementById("sjsWhyOverlay");
+  if (ov) ov.remove();
+}
+
+function openWhyPanel(text) {
+  // Replace any existing overlay
+  closeWhyPanel();
+
+  const overlay = document.createElement("div");
+  overlay.id = "sjsWhyOverlay";
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "sjsWhyBackdrop";
+  backdrop.addEventListener("click", closeWhyPanel);
+
+  const panel = document.createElement("div");
+  panel.id = "sjsWhyPanel";
+
+  const btn = document.createElement("button");
+  btn.id = "sjsWhyClose";
+  btn.type = "button";
+  btn.textContent = "Close";
+  btn.addEventListener("click", closeWhyPanel);
+
+  const body = document.createElement("div");
+  body.textContent = text;
+
+  panel.appendChild(btn);
+  panel.appendChild(body);
+
+  overlay.appendChild(backdrop);
+  overlay.appendChild(panel);
+
+  document.body.appendChild(overlay);
+}
+
 function locationHasCanada(locRaw) {
   const raw = String(locRaw || "");
   if (!raw) return false;
@@ -129,7 +167,7 @@ async function ensureDurableRulesLoaded() {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.70); }
+    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.35); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
 
@@ -163,6 +201,46 @@ async function ensureDurableRulesLoaded() {
       max-width:min(520px, calc(100vw - 30px));
     }
     .sjs-toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+    /* WHY PANEL (persistent, rectangular; closes only when you close it) */
+    #sjsWhyOverlay{
+      position:fixed; inset:0; z-index:10000;
+      display:flex; align-items:center; justify-content:center;
+      padding:18px;
+    }
+    #sjsWhyBackdrop{
+      position:absolute; inset:0;
+      background:rgba(0,0,0,.58);
+    }
+    #sjsWhyPanel{
+      position:relative;
+      width:min(560px, calc(100vw - 36px));
+      max-height:min(72vh, 520px);
+      overflow:auto;
+      border-radius:14px;
+      background:rgba(0,0,0,.90);
+      color:rgba(255,255,255,.92);
+      border:1px solid rgba(255,255,255,.18);
+      padding:14px 14px 12px;
+      box-shadow:0 10px 32px rgba(0,0,0,.35);
+      white-space:pre-line;
+      font-size:13px;
+      line-height:1.35;
+    }
+    #sjsWhyClose{
+      position:sticky;
+      top:0;
+      float:right;
+      margin:-2px 0 8px 8px;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);
+      color:rgba(255,255,255,.92);
+      font-weight:700;
+      cursor:pointer;
+    }
+
   `;
   document.head.appendChild(style);
 })();
@@ -664,13 +742,13 @@ function whyVerdict(job) {
 
 function showWhy(job) {
   const v = whyVerdict(job);
-  toast(
+  const text =
     `Verdict: ${v.color.toUpperCase()}\n` +
     `Reason: ${v.reason}\n\n` +
     `Title: ${job.title}\n` +
     `Location: ${job.location}\n` +
-    `Company: ${job.company}`
-  );
+    `Company: ${job.company}`;
+  openWhyPanel(text);
 }
 
 // ---------- Rendering ----------
@@ -790,11 +868,6 @@ async function runSearch() {
   }
 
   let jobs = [];
-  let jobsFetchedTotal = 0;
-  let sourcesOk = 0;
-  let sourcesTimeout = 0;
-  let sourcesFailed = 0;
-
   const total = tasks.length;
   const span = 100 - PROGRESS_BASELINE_PCT;
 
@@ -811,29 +884,15 @@ async function runSearch() {
 
     try {
       const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
-      sourcesOk += 1;
+      if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
 
-      if (Array.isArray(chunk) && chunk.length) {
-        jobs.push(...chunk);
-        jobsFetchedTotal += chunk.length;
-        setRunUI({
-          show: true,
-          status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
-          pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
-          note: `Fetched ${chunk.length} job(s)`
-        });
-      } else {
-        setRunUI({
-          show: true,
-          status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
-          pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
-          note: "Fetched 0 job(s)"
-        });
-      }
+      setRunUI({
+        show: true,
+        status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
+        pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
+        note: `Fetched ${Array.isArray(chunk) ? chunk.length : 0} job(s)`
+      });
     } catch (e) {
-      if (e && e.message === "SOURCE_TIMEOUT") sourcesTimeout += 1;
-      else sourcesFailed += 1;
-
       setRunUI({
         show: true,
         status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
@@ -876,17 +935,7 @@ async function runSearch() {
   loaded.textContent = `Loaded ${ranked.length}`;
   out.appendChild(loaded);
 
-  const summary = document.createElement("div");
-  summary.className = "sjs-runSummary";
-  summary.textContent = `Sources: ok ${sourcesOk}, timeouts ${sourcesTimeout}, failed ${sourcesFailed} | Jobs fetched: ${jobsFetchedTotal} | Loaded: ${ranked.length}`;
-  out.appendChild(summary);
-
-  setRunUI({
-    show: true,
-    status: `Complete: Loaded ${ranked.length} (ok ${sourcesOk}, t/o ${sourcesTimeout}, failed ${sourcesFailed})`,
-    pct: 100,
-    note: "Run finished"
-  });
+  setRunUI({ show: true, status: `Complete: Loaded ${ranked.length}`, pct: 100, note: "Run finished" });
   setTimeout(() => setRunUI({ show: false }), 1200);
 }
 

@@ -534,9 +534,30 @@ async function fetchCustom(url) {
   } catch { return []; }
 }
 
-// ---------- Gates (minimal; explicit rules remain authoritative) ----------
-function passesGates(job, relaxed) {
+// ---------- Gates (strict vs relaxed) ----------
+function passesGates(job, relaxed = false) {
+  // Hard exclusion: explicit rules (durable + staged) are authoritative.
   if (evaluateExplicitRules(job)) return false;
+
+  // "Strict" is remote-first. "Relaxed" allows non-remote to be reviewed.
+  const loc = norm(job.location);
+
+  const isRemote = loc.includes("remote");
+  const isHybrid = loc.includes("hybrid");
+  const isOnsite =
+    loc.includes("onsite") ||
+    loc.includes("on-site") ||
+    loc.includes("in office") ||
+    loc.includes("in-office") ||
+    loc.includes("office");
+
+  if (!relaxed) {
+    // Strict: hide obvious non-remote roles.
+    if (isOnsite || isHybrid) return false;
+    if (!isRemote) return false;
+  }
+
+  // Otherwise keep it for operator judgment.
   return true;
 }
 
@@ -562,27 +583,61 @@ function looksLikeUSLocation(locRaw) {
 }
 
 function whyVerdict(job) {
+  // Red if it would be excluded by explicit rules.
   if (evaluateExplicitRules(job)) return { color: "red", reason: "Explicit rule hit" };
 
-  const loc = String(job.location || "").trim();
-  const locN = norm(loc);
-  if (!locN) return { color: "yellow", reason: "Missing location string" };
+  const locRaw = String(job.location || "").trim();
+  const loc = norm(locRaw);
 
-  const isRemote = locN.includes("remote");
-  const isHybrid = locN.includes("hybrid");
+  if (!loc) return { color: "yellow", reason: "Missing location string" };
+
+  const isRemote = loc.includes("remote");
+  const isHybrid = loc.includes("hybrid");
   const isOnsite =
-    locN.includes("onsite") ||
-    locN.includes("on-site") ||
-    locN.includes("in office") ||
-    locN.includes("in-office") ||
-    locN.includes("office");
+    loc.includes("onsite") ||
+    loc.includes("on-site") ||
+    loc.includes("in office") ||
+    loc.includes("in-office") ||
+    loc.includes("office");
 
+  // Strict: remote-first coloring.
   if (state.mode === "strict") {
-    if (isOnsite || isHybrid) return { color: "yellow", reason: "Not remote" };
-    if (isRemote && !looksLikeUSLocation(loc)) return { color: "yellow", reason: "Remote, region unclear" };
+    if (isOnsite || isHybrid) return { color: "red", reason: "Not remote" };
+    if (!isRemote) return { color: "red", reason: "Location does not say remote" };
+
+    // Remote but with constraints should be Yellow.
+    const hasHardConstraint =
+      /must be|must reside|must live|within|commutable|commute|hybrid|in[- ]person|on[- ]site|on[- ]call|come in|onsite|on-site/.test(loc) ||
+      /\b(\d{1,2})\s*(days|day)\s*(a|per)?\s*week\b/.test(loc);
+
+    // City/state pattern
+    const hasCitySignal =
+      /,\s*[A-Z]{2}\b/.test(locRaw) ||
+      /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
+
+    if (hasHardConstraint || hasCitySignal) {
+      return { color: "yellow", reason: "Remote with location constraint" };
+    }
+
+    // Remote but region unclear -> Yellow (review)
+    if (isRemote && !looksLikeUSLocation(locRaw) && !(loc.includes("united states") || loc.includes("usa") || loc.includes("us"))) {
+      return { color: "yellow", reason: "Remote, region unclear" };
+    }
+
+    return { color: "green", reason: "Remote (no explicit rule hit)" };
   }
 
-  return { color: "green", reason: "No explicit rule hit" };
+  // Relaxed: signal non-remote as Yellow (review) instead of Red.
+  if (isOnsite || isHybrid) return { color: "yellow", reason: "Onsite/Hybrid (relaxed mode)" };
+  if (!isRemote) return { color: "yellow", reason: "Not remote (relaxed mode)" };
+
+  const hasCitySignal =
+    /,\s*[A-Z]{2}\b/.test(locRaw) ||
+    /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
+
+  if (hasCitySignal) return { color: "yellow", reason: "Remote with location signal" };
+
+  return { color: "green", reason: "Remote" };
 }
 
 function showWhy(job) {
@@ -895,8 +950,7 @@ function wire() {
 
   $("btnRun")?.addEventListener("click", runSearch);
   $("btnClear")?.addEventListener("click", () => {
-    // Keep this conservative: only clears job memory + staged rules, not sources.
-    // (If you want full device wipe again, say so and I’ll restore that behavior.)
+    // Conservative: clears job memory + staged rules, not sources.
     try { localStorage.removeItem(MEMORY_KEY); } catch {}
     try { localStorage.removeItem(STAGED_RULES_KEY); } catch {}
     loadMemory();

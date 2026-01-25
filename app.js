@@ -167,6 +167,76 @@ async function ensureDurableRulesLoaded() {
   document.head.appendChild(style);
 })();
 
+// ---------- Progress UI (run semantics) ----------
+function ensureProgressUI() {
+  if (document.getElementById("sjsStatusWrap")) return;
+
+  const controls = document.querySelector(".controls");
+  if (!controls) return;
+
+  const statusWrap = document.createElement("div");
+  statusWrap.id = "sjsStatusWrap";
+  statusWrap.className = "sjs-statuswrap";
+  statusWrap.hidden = true;
+
+  const statusText = document.createElement("div");
+  statusText.id = "sjsStatusText";
+  statusText.textContent = "";
+
+  statusWrap.appendChild(statusText);
+
+  const progress = document.createElement("div");
+  progress.id = "sjsProgress";
+  progress.className = "sjs-progress";
+  progress.hidden = true;
+
+  const bar = document.createElement("div");
+  bar.id = "sjsProgressBar";
+  progress.appendChild(bar);
+
+  const note = document.createElement("div");
+  note.id = "sjsNote";
+  note.className = "sjs-note";
+  note.hidden = true;
+
+  controls.insertAdjacentElement("afterend", statusWrap);
+  statusWrap.insertAdjacentElement("afterend", progress);
+  progress.insertAdjacentElement("afterend", note);
+}
+
+function setRunUI({ show, status, pct, note }) {
+  ensureProgressUI();
+
+  const sw = document.getElementById("sjsStatusWrap");
+  const st = document.getElementById("sjsStatusText");
+  const pr = document.getElementById("sjsProgress");
+  const pb = document.getElementById("sjsProgressBar");
+  const nt = document.getElementById("sjsNote");
+
+  if (!sw || !st || !pr || !pb || !nt) return;
+
+  if (show) {
+    sw.hidden = false;
+    pr.hidden = false;
+    nt.hidden = false;
+  }
+
+  if (typeof status === "string") st.textContent = status;
+
+  if (typeof pct === "number") {
+    const clamped = Math.max(0, Math.min(100, pct));
+    pb.style.width = clamped.toFixed(0) + "%";
+  }
+
+  if (typeof note === "string") nt.textContent = note;
+
+  if (!show) {
+    sw.hidden = true;
+    pr.hidden = true;
+    nt.hidden = true;
+  }
+}
+
 // ---------- Settings persistence ----------
 function loadSettings() {
   state.greenhouse = safeJsonParse(localStorage.getItem("greenhouse") || "[]", []);
@@ -317,6 +387,158 @@ function evaluateExplicitRules(job) {
     if (rt === "keyword" && text.includes(rv)) return true;
   }
   return false;
+}
+
+// ---------- Dirty UI (staged rules visibility + actions) ----------
+function ensureDirtyUI() {
+  const controls = document.querySelector(".controls");
+  if (!controls) return null;
+
+  let wrap = document.getElementById("sjsDirtyWrap");
+  if (wrap) return wrap;
+
+  wrap = document.createElement("div");
+  wrap.id = "sjsDirtyWrap";
+  wrap.className = "sjs-dirtywrap";
+
+  const tag = document.createElement("div");
+  tag.id = "sjsDirtyTag";
+  tag.className = "sjs-dirtytag";
+  tag.textContent = "Dirty: 0";
+
+  const note = document.createElement("span");
+  note.id = "sjsDirtyNote";
+  note.className = "sjs-dirtynote";
+  note.textContent = "Staged rules (local)";
+
+  tag.appendChild(note);
+
+  const btnCopy = document.createElement("button");
+  btnCopy.id = "sjsDirtyCopy";
+  btnCopy.className = "sjs-dirtybtn";
+  btnCopy.type = "button";
+  btnCopy.textContent = "Copy";
+
+  const btnMail = document.createElement("button");
+  btnMail.id = "sjsDirtyMail";
+  btnMail.className = "sjs-dirtybtn";
+  btnMail.type = "button";
+  btnMail.textContent = "Mail";
+
+  const btnDownload = document.createElement("button");
+  btnDownload.id = "sjsDirtyDownload";
+  btnDownload.className = "sjs-dirtybtn";
+  btnDownload.type = "button";
+  btnDownload.textContent = "Download";
+
+  wrap.append(tag, btnCopy, btnMail, btnDownload);
+  controls.appendChild(wrap);
+
+  btnCopy.onclick = async () => {
+    const payload = buildRulesExportPayload();
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        toast("Copied export JSON");
+        return;
+      }
+    } catch {}
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      toast("Copied export JSON");
+    } catch {
+      toast("Copy failed (clipboard unavailable)");
+    }
+  };
+
+  btnDownload.onclick = () => {
+    const payload = buildRulesExportPayload();
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      const blob = new Blob([text], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "rules-export.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 800);
+      toast("Downloaded export JSON");
+    } catch {
+      toast("Download failed");
+    }
+  };
+
+  btnMail.onclick = () => {
+    const payload = buildRulesExportPayload();
+    const text = JSON.stringify(payload, null, 2);
+
+    const subject = "Strict Job Search — staged rules export";
+    // Best-effort size guard for mailto bodies
+    const body = text.length > 14000
+      ? (text.slice(0, 14000) + "\n\n[TRUNCATED: copy/download for full payload]")
+      : text;
+
+    const href = "mailto:?" +
+      "subject=" + encodeURIComponent(subject) +
+      "&body=" + encodeURIComponent(body);
+
+    try {
+      window.location.href = href;
+    } catch {
+      toast("Mail failed");
+    }
+  };
+
+  return wrap;
+}
+
+function buildRulesExportPayload() {
+  if (window.EXPORT_RULES_JSON && typeof window.EXPORT_RULES_JSON === "object") {
+    return window.EXPORT_RULES_JSON;
+  }
+  const base = window.APP_STATE?.rules || {};
+  const baseExplicit = Array.isArray(base.explicitRules) ? base.explicitRules : [];
+  const staged = getStagedRules();
+  return {
+    ...base,
+    explicitRules: baseExplicit.concat(staged),
+    // Marking as local export (not promoted) without changing durable rules.
+    stagedNotPromoted: true,
+    exportedAt: new Date().toISOString()
+  };
+}
+
+function refreshDirtyUI() {
+  const wrap = ensureDirtyUI();
+  if (!wrap) return;
+
+  const staged = getStagedRules();
+  const dirtyCount = Array.isArray(staged) ? staged.length : 0;
+
+  const tag = document.getElementById("sjsDirtyTag");
+  const btnCopy = document.getElementById("sjsDirtyCopy");
+  const btnMail = document.getElementById("sjsDirtyMail");
+  const btnDownload = document.getElementById("sjsDirtyDownload");
+
+  if (tag) tag.firstChild
+    ? (tag.childNodes[0].nodeValue = `Dirty: ${dirtyCount}`)
+    : (tag.textContent = `Dirty: ${dirtyCount}`);
+
+  const show = dirtyCount > 0;
+  wrap.style.display = show ? "" : "none";
+
+  if (btnCopy) btnCopy.disabled = !show;
+  if (btnMail) btnMail.disabled = !show;
+  if (btnDownload) btnDownload.disabled = !show;
 }
 
 // ---------- Gates ----------
@@ -532,6 +754,10 @@ async function runSearch() {
   const out = $("results");
   if (!out) return;
 
+  // Initialize UI semantics for this run
+  refreshDirtyUI();
+  setRunUI({ show: true, status: "Starting search…", pct: PROGRESS_BASELINE_PCT, note: "Preparing sources and rules" });
+
   await Promise.race([awaitRulesReady(1500), ensureDurableRulesLoaded()]);
 
   out.innerHTML = "";
@@ -546,17 +772,55 @@ async function runSearch() {
 
   if (!tasks.length) {
     out.innerHTML = `<div class="loaded">Loaded 0</div>`;
+    setRunUI({ show: true, status: "Complete: Loaded 0", pct: 100, note: "No sources configured" });
     toast("No sources configured");
     return;
   }
 
   let jobs = [];
-  for (const t of tasks) {
+  const total = tasks.length;
+  const span = 100 - PROGRESS_BASELINE_PCT;
+
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const idx = i + 1;
+
+    setRunUI({
+      show: true,
+      status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
+      pct: PROGRESS_BASELINE_PCT + (span * (i / total)),
+      note: "Fetching source…"
+    });
+
     try {
       const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
-      if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
-    } catch {}
+      if (Array.isArray(chunk) && chunk.length) {
+        jobs.push(...chunk);
+        setRunUI({
+          show: true,
+          status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
+          pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
+          note: `Fetched ${chunk.length} job(s)`
+        });
+      } else {
+        setRunUI({
+          show: true,
+          status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
+          pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
+          note: "Fetched 0 job(s)"
+        });
+      }
+    } catch (e) {
+      setRunUI({
+        show: true,
+        status: `Running ${idx}/${total}: ${t.type} (${t.label})`,
+        pct: PROGRESS_BASELINE_PCT + (span * (idx / total)),
+        note: "Timed out / failed (skipped)"
+      });
+    }
   }
+
+  setRunUI({ show: true, status: "Filtering & ranking…", pct: 98, note: "Applying gates and rules" });
 
   const seen = new Set();
   const uniq = [];
@@ -588,6 +852,8 @@ async function runSearch() {
   loaded.className = "loaded";
   loaded.textContent = `Loaded ${ranked.length}`;
   out.appendChild(loaded);
+
+  setRunUI({ show: true, status: `Complete: Loaded ${ranked.length}`, pct: 100, note: "Run finished" });
 }
 
 // ---------- Fetchers ----------
@@ -649,12 +915,15 @@ function wire() {
     try { localStorage.removeItem(MEMORY_KEY); } catch {}
     try { localStorage.removeItem(STAGED_RULES_KEY); } catch {}
     loadMemory();
+    refreshDirtyUI();
     toast("Cleared job memory + staged rules");
   });
   $("modeStrict")?.addEventListener("click", () => setMode("strict"));
   $("modeRelaxed")?.addEventListener("click", () => setMode("relaxed"));
   loadSettings();
   loadMemory();
+  ensureProgressUI();
+  refreshDirtyUI();
 }
 
 if (document.readyState === "loading") {

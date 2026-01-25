@@ -1,17 +1,19 @@
-// app.js — Strict Job Search (foundation restore, full pasteover)
-// Aligned to index.html IDs:
-//   #btnRun #btnSettings #btnClear #modeStrict #modeRelaxed
-//   #settings #greenhouse #lever #custom #btnSave
-//   #results
-// Mounts into: .controls
+// app.js — Strict Job Search (rebase-safe)
+// Aligned to index.html IDs: #btnRun #btnSettings #btnClear #modeStrict #modeRelaxed
+// Settings textareas: #greenhouse #lever #custom ; Save: #btnSave ; Settings panel: #settings
+// Results container: #results ; Controls container: .controls
 //
-// Restores:
-// • Animated progress bar (CSS in styles.css: .sjs-progress)
-// • Progress status text under bar (.sjs-note): step/total + ok/fail/timeout/empty + current source
-// • Full job card function buttons: View, Reject, Blacklist (after Reject), Applied (after View)
-// • Why icon per card (no external image dependency)
-// • Authoritative purge: stage rule -> re-filter state.currentResults -> rerender
-// • Settings persistence guard: never overwrite storage if settings DOM missing
+// Fixes:
+// 1) Settings persistence no longer gets wiped on reload.
+// 2) Dirty plaque always mounts (no missing anchor).
+// 3) Blacklist purge is authoritative: re-filter + re-render.
+// 4) Whycons restored with real semantics (not “everything green”).
+// 5) Strict vs Relaxed gates restored (strict hides non-remote, relaxed keeps + signals).
+// 6) NEW: Red means hard-exclude: red cards never render.
+//
+// Notes:
+// • DOM is a view; localStorage + in-memory state are authoritative.
+// • No CSS change required.
 
 const $ = (id) => document.getElementById(id);
 
@@ -87,6 +89,7 @@ function toast(msg) {
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
     .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
+    .whyicon img{ width:100%; height:100%; object-fit:contain; }
     .whyicon .whyglyph{
       font-weight:900; font-size:14px; line-height:1;
       color:rgba(255,255,255,.92);
@@ -277,7 +280,7 @@ function evaluateExplicitRules(job) {
   const comp = norm(job.company);
   const title = norm(job.title);
   const loc = norm(job.location);
-  const text = norm(job.title + " " + job.location + " " + job.description);
+  const text = norm(job.title + " " + job.location + " " + (job.description || ""));
 
   for (const r of rules) {
     const rt = norm(r?.type);
@@ -292,6 +295,220 @@ function evaluateExplicitRules(job) {
   return false;
 }
 
+// ---------- Gates ----------
+function passesGates(job, relaxed = false) {
+  // Hard exclusion: explicit rules (durable + staged) are authoritative.
+  if (evaluateExplicitRules(job)) return false;
+
+  // Strict is remote-first. Relaxed keeps non-remote for operator judgment.
+  const locRaw = String(job.location || "").trim();
+  const loc = norm(locRaw);
+
+  const isRemote = loc.includes("remote");
+  const isHybrid = loc.includes("hybrid");
+  const isOnsite =
+    loc.includes("onsite") ||
+    loc.includes("on-site") ||
+    loc.includes("in office") ||
+    loc.includes("in-office") ||
+    loc.includes("office");
+
+  if (!relaxed) {
+    if (isOnsite || isHybrid) return false;
+    if (!isRemote) return false;
+  }
+
+  return true;
+}
+
+// ---------- Why icon semantics (red/yellow/green) ----------
+const US_STATE_ABBRS = new Set([
+  "AL","AK","AZ","AR","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY"
+]);
+
+function looksLikeUSLocation(locRaw) {
+  const raw = String(locRaw || "");
+  const loc = norm(raw);
+  if (!loc) return false;
+
+  if (loc.includes("canada")) return false;
+  if (loc.includes("united states") || loc.includes("usa") || loc.includes("u.s.") || loc.includes("us ")) return true;
+
+  const m = raw.match(/,\s*([A-Z]{2})\b/);
+  if (m && US_STATE_ABBRS.has(m[1])) return true;
+
+  const upper = raw.toUpperCase();
+  for (const ab of US_STATE_ABBRS) {
+    if (upper.match(new RegExp(`\\b${ab}\\b`))) return true;
+  }
+  return false;
+}
+
+const TITLE_CONTRADICTION_TERMS = [
+  "marketing",
+  "account executive",
+  "business development",
+  "sales",
+  "recruiter",
+  "human resources",
+  "hr",
+  "finance",
+  "payroll",
+  "treasury",
+  "customer success",
+  "regional marketing",
+  "partner marketing",
+  "legal counsel",
+  "attorney",
+  "paralegal"
+];
+
+function titleContradiction(job) {
+  const t = norm(job?.title);
+  if (!t) return null;
+  for (const term of TITLE_CONTRADICTION_TERMS) {
+    const n = norm(term);
+    if (n && t.includes(n)) return term;
+  }
+  return null;
+}
+
+function whyVerdict(job) {
+  // Red means: do not show the card at all.
+  // Yellow means: show, but operator-review required.
+  // Green means: show, generally aligned.
+
+  // Hard exclusions by rule.
+  if (evaluateExplicitRules(job)) return { color: "red", reason: "Explicit rule hit" };
+
+  // Hard exclusions by title contradiction.
+  const contra = titleContradiction(job);
+  if (contra) return { color: "red", reason: `Title contradiction: ${contra}` };
+
+  const locRaw = String(job?.location || "").trim();
+  const loc = norm(locRaw);
+
+  if (!loc) return { color: "yellow", reason: "Missing location string" };
+
+  const isRemote = loc.includes("remote");
+  const isHybrid = loc.includes("hybrid");
+  const isOnsite =
+    loc.includes("onsite") ||
+    loc.includes("on-site") ||
+    loc.includes("in office") ||
+    loc.includes("in-office") ||
+    loc.includes("office");
+
+  // Strict mode: remote-first.
+  if (state.mode === "strict") {
+    if (isOnsite || isHybrid) return { color: "red", reason: "Not remote" };
+    if (!isRemote) return { color: "red", reason: "Location does not say remote" };
+
+    // Remote with explicit locality/commute constraints -> Yellow (review).
+    const hasHardConstraint =
+      /must be|must reside|must live|within|commutable|commute|in[- ]person|on[- ]site|come in|onsite|on-site/.test(loc) ||
+      /\b(\d{1,2})\s*(days|day)\s*(a|per)?\s*week\b/.test(loc);
+
+    const hasCitySignal =
+      /,\s*[A-Z]{2}\b/.test(locRaw) ||
+      /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
+
+    if (hasHardConstraint || hasCitySignal) return { color: "yellow", reason: "Remote with location constraint" };
+
+    if (isRemote && !looksLikeUSLocation(locRaw) && !(loc.includes("united states") || loc.includes("usa") || loc.includes("us"))) {
+      return { color: "yellow", reason: "Remote, region unclear" };
+    }
+
+    return { color: "green", reason: "Remote (no explicit rule hit)" };
+  }
+
+  // Relaxed mode: keep non-remote for review.
+  if (isOnsite || isHybrid) return { color: "yellow", reason: "Onsite/Hybrid (relaxed mode)" };
+  if (!isRemote) return { color: "yellow", reason: "Not remote (relaxed mode)" };
+
+  const hasCitySignal =
+    /,\s*[A-Z]{2}\b/.test(locRaw) ||
+    /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
+
+  if (hasCitySignal) return { color: "yellow", reason: "Remote with location signal" };
+
+  return { color: "green", reason: "Remote" };
+}
+
+function showWhy(job) {
+  const v = whyVerdict(job);
+  toast(
+    `Verdict: ${v.color.toUpperCase()}\n` +
+    `Reason: ${v.reason}\n\n` +
+    `Title: ${job.title}\n` +
+    `Location: ${job.location}\n` +
+    `Company: ${job.company}`
+  );
+}
+
+// ---------- Blacklist panel ----------
+function buildBlacklistPanel(job) {
+  const panel = document.createElement("div");
+  panel.className = "bl-panel";
+
+  const mkRow = () => { const d = document.createElement("div"); d.className = "bl-row"; return d; };
+
+  const row1 = mkRow();
+  const cbCompany = document.createElement("input"); cbCompany.type = "checkbox";
+  const labCompany = document.createElement("label"); labCompany.textContent = `Company (${job.company})`;
+  row1.append(cbCompany, labCompany);
+
+  const row2 = mkRow();
+  const cbTitle = document.createElement("input"); cbTitle.type = "checkbox";
+  const labTitle = document.createElement("label"); labTitle.textContent = "Title phrase";
+  const inTitle = document.createElement("input"); inTitle.type = "text"; inTitle.value = job.title || "";
+  row2.append(cbTitle, labTitle, inTitle);
+
+  const row3 = mkRow();
+  const cbLoc = document.createElement("input"); cbLoc.type = "checkbox";
+  const labLoc = document.createElement("label"); labLoc.textContent = "Location phrase";
+  const inLoc = document.createElement("input"); inLoc.type = "text"; inLoc.value = job.location || "";
+  row3.append(cbLoc, labLoc, inLoc);
+
+  const row4 = mkRow();
+  const cbKw = document.createElement("input"); cbKw.type = "checkbox";
+  const labKw = document.createElement("label"); labKw.textContent = "Keyword(s)";
+  const inKw = document.createElement("input"); inKw.type = "text"; inKw.placeholder = "comma-separated (optional)";
+  row4.append(cbKw, labKw, inKw);
+
+  const hint = document.createElement("div");
+  hint.className = "bl-hint";
+  hint.textContent = "Stages rules locally. Export via Copy/Mail/Download rules.json.";
+
+  const actions = document.createElement("div");
+  actions.className = "bl-actions";
+
+  const btnStage = document.createElement("button");
+  btnStage.className = "btn primary";
+  btnStage.textContent = "Stage rules";
+
+  const btnClose = document.createElement("button");
+  btnClose.className = "btn";
+  btnClose.textContent = "Close";
+  btnClose.onclick = () => panel.remove();
+
+  btnStage.onclick = () => {
+    if (cbCompany.checked) stageRule({ type: "company", value: job.company });
+    if (cbTitle.checked) stageRule({ type: "title", value: inTitle.value });
+    if (cbLoc.checked) stageRule({ type: "location", value: inLoc.value });
+    if (cbKw.checked) {
+      const parts = (inKw.value || "").split(",").map(s => s.trim()).filter(Boolean);
+      parts.forEach(p => stageRule({ type: "keyword", value: p }));
+    }
+
+    purgeAndRerender();
+  };
+
+  actions.append(btnStage, btnClose);
+  panel.append(row1, row2, row3, row4, hint, actions);
+  return panel;
+}
+
 // ---------- Authoritative purge ----------
 function rerenderFromCurrentResults() {
   const out = $("results");
@@ -300,7 +517,10 @@ function rerenderFromCurrentResults() {
   out.innerHTML = "";
   state.rendered = {};
 
-  const filtered = (state.currentResults || []).filter(j => !evaluateExplicitRules(j));
+  const filtered = (state.currentResults || [])
+    .filter(j => !evaluateExplicitRules(j))
+    .filter(j => whyVerdict(j).color !== "red");
+
   state.currentResults = filtered;
 
   filtered.forEach(j => out.appendChild(renderJob(j)));
@@ -434,7 +654,7 @@ function ensureProgressUI() {
   if (!note) {
     note = document.createElement("div");
     note.id = "sjsProgressNote";
-    note.className = "sjs-note"; // styles.css defines this
+    note.className = "sjs-note";
     note.textContent = "";
   }
   if (wrap.nextSibling !== note) {
@@ -534,297 +754,94 @@ async function fetchCustom(url) {
   } catch { return []; }
 }
 
-// ---------- Gates (strict vs relaxed) ----------
-function passesGates(job, relaxed = false) {
-  // Hard exclusion: explicit rules (durable + staged) are authoritative.
-  if (evaluateExplicitRules(job)) return false;
-
-  // "Strict" is remote-first. "Relaxed" allows non-remote to be reviewed.
-  const loc = norm(job.location);
-
-  const isRemote = loc.includes("remote");
-  const isHybrid = loc.includes("hybrid");
-  const isOnsite =
-    loc.includes("onsite") ||
-    loc.includes("on-site") ||
-    loc.includes("in office") ||
-    loc.includes("in-office") ||
-    loc.includes("office");
-
-  if (!relaxed) {
-    // Strict: hide obvious non-remote roles.
-    if (isOnsite || isHybrid) return false;
-    if (!isRemote) return false;
-  }
-
-  // Otherwise keep it for operator judgment.
-  return true;
-}
-
-// ---------- Why semantics (UI signal) ----------
-const US_STATE_ABBRS = new Set([
-  "AL","AK","AZ","AR","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY"
-]);
-
-function looksLikeUSLocation(locRaw) {
-  const loc = norm(locRaw);
-  if (!loc) return false;
-  if (loc.includes("canada")) return false;
-  if (loc.includes("united states") || loc.includes("usa") || loc.includes("u.s.") || loc.includes("us ")) return true;
-
-  const m = String(locRaw || "").match(/,\s*([A-Z]{2})\b/);
-  if (m && US_STATE_ABBRS.has(m[1])) return true;
-
-  const upper = String(locRaw || "").toUpperCase();
-  for (const ab of US_STATE_ABBRS) {
-    if (upper.match(new RegExp(`\\b${ab}\\b`))) return true;
-  }
-  return false;
-}
-
-function whyVerdict(job) {
-  // Red if it would be excluded by explicit rules.
-  if (evaluateExplicitRules(job)) return { color: "red", reason: "Explicit rule hit" };
-
-  const locRaw = String(job.location || "").trim();
-  const loc = norm(locRaw);
-
-  if (!loc) return { color: "yellow", reason: "Missing location string" };
-
-  const isRemote = loc.includes("remote");
-  const isHybrid = loc.includes("hybrid");
-  const isOnsite =
-    loc.includes("onsite") ||
-    loc.includes("on-site") ||
-    loc.includes("in office") ||
-    loc.includes("in-office") ||
-    loc.includes("office");
-
-  // Strict: remote-first coloring.
-  if (state.mode === "strict") {
-    if (isOnsite || isHybrid) return { color: "red", reason: "Not remote" };
-    if (!isRemote) return { color: "red", reason: "Location does not say remote" };
-
-    // Remote but with constraints should be Yellow.
-    const hasHardConstraint =
-      /must be|must reside|must live|within|commutable|commute|hybrid|in[- ]person|on[- ]site|on[- ]call|come in|onsite|on-site/.test(loc) ||
-      /\b(\d{1,2})\s*(days|day)\s*(a|per)?\s*week\b/.test(loc);
-
-    // City/state pattern
-    const hasCitySignal =
-      /,\s*[A-Z]{2}\b/.test(locRaw) ||
-      /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
-
-    if (hasHardConstraint || hasCitySignal) {
-      return { color: "yellow", reason: "Remote with location constraint" };
-    }
-
-    // Remote but region unclear -> Yellow (review)
-    if (isRemote && !looksLikeUSLocation(locRaw) && !(loc.includes("united states") || loc.includes("usa") || loc.includes("us"))) {
-      return { color: "yellow", reason: "Remote, region unclear" };
-    }
-
-    return { color: "green", reason: "Remote (no explicit rule hit)" };
-  }
-
-  // Relaxed: signal non-remote as Yellow (review) instead of Red.
-  if (isOnsite || isHybrid) return { color: "yellow", reason: "Onsite/Hybrid (relaxed mode)" };
-  if (!isRemote) return { color: "yellow", reason: "Not remote (relaxed mode)" };
-
-  const hasCitySignal =
-    /,\s*[A-Z]{2}\b/.test(locRaw) ||
-    /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
-
-  if (hasCitySignal) return { color: "yellow", reason: "Remote with location signal" };
-
-  return { color: "green", reason: "Remote" };
-}
-
-function showWhy(job) {
-  const v = whyVerdict(job);
-  toast(
-    `Verdict: ${v.color.toUpperCase()}\n` +
-    `Reason: ${v.reason}\n\n` +
-    `Title: ${job.title}\n` +
-    `Location: ${job.location}\n` +
-    `Company: ${job.company}`
-  );
-}
-
-// ---------- Blacklist panel (appears after Reject) ----------
-function buildBlacklistPanel(job, hostCard) {
-  const panel = document.createElement("div");
-  panel.className = "bl-panel";
-
-  const mkRow = () => { const d = document.createElement("div"); d.className = "bl-row"; return d; };
-
-  const row1 = mkRow();
-  const cbCompany = document.createElement("input"); cbCompany.type = "checkbox";
-  const labCompany = document.createElement("label"); labCompany.textContent = `Company (${job.company})`;
-  row1.append(cbCompany, labCompany);
-
-  const row2 = mkRow();
-  const cbTitle = document.createElement("input"); cbTitle.type = "checkbox";
-  const labTitle = document.createElement("label"); labTitle.textContent = "Title phrase";
-  const inTitle = document.createElement("input"); inTitle.type = "text"; inTitle.value = job.title || "";
-  row2.append(cbTitle, labTitle, inTitle);
-
-  const row3 = mkRow();
-  const cbLoc = document.createElement("input"); cbLoc.type = "checkbox";
-  const labLoc = document.createElement("label"); labLoc.textContent = "Location phrase";
-  const inLoc = document.createElement("input"); inLoc.type = "text"; inLoc.value = job.location || "";
-  row3.append(cbLoc, labLoc, inLoc);
-
-  const row4 = mkRow();
-  const cbKw = document.createElement("input"); cbKw.type = "checkbox";
-  const labKw = document.createElement("label"); labKw.textContent = "Keyword(s)";
-  const inKw = document.createElement("input"); inKw.type = "text"; inKw.placeholder = "comma-separated (optional)";
-  row4.append(cbKw, labKw, inKw);
-
-  const hint = document.createElement("div");
-  hint.className = "bl-hint";
-  hint.textContent = "Stages rules locally. Export via Copy/Mail/Download rules.json.";
-
-  const actions = document.createElement("div");
-  actions.className = "bl-actions";
-
-  const btnStage = document.createElement("button");
-  btnStage.className = "btn primary";
-  btnStage.textContent = "Stage rules";
-
-  const btnClose = document.createElement("button");
-  btnClose.className = "btn";
-  btnClose.textContent = "Close";
-  btnClose.onclick = () => panel.remove();
-
-  btnStage.onclick = () => {
-    if (cbCompany.checked) stageRule({ type: "company", value: job.company });
-    if (cbTitle.checked) stageRule({ type: "title", value: inTitle.value });
-    if (cbLoc.checked) stageRule({ type: "location", value: inLoc.value });
-    if (cbKw.checked) {
-      const parts = (inKw.value || "").split(",").map(s => s.trim()).filter(Boolean);
-      parts.forEach(p => stageRule({ type: "keyword", value: p }));
-    }
-
-    // Authoritative purge
-    purgeAndRerender();
-  };
-
-  actions.append(btnStage, btnClose);
-  panel.append(row1, row2, row3, row4, hint, actions);
-
-  // Ensure only one panel per card
-  const existing = hostCard.querySelector(".bl-panel");
-  if (existing) existing.remove();
-
-  return panel;
-}
-
-// ---------- Rendering (FULL function buttons restored) ----------
+// ---------- Rendering ----------
 function renderJob(job) {
   const id = jobId(job);
   state.rendered[id] = job;
 
   const record = getRecord(id);
 
-  const card = document.createElement("div");
-  card.className = "job";
-  card.setAttribute("data-jobid", id);
+  const div = document.createElement("div");
+  div.className = "job";
+  div.setAttribute("data-jobid", id);
 
-  if (record.viewed) card.classList.add("viewed");
-  if (record.rejected) card.classList.add("rejected");
-  if (record.appliedConfirmed) card.classList.add("appliedConfirmed");
+  if (record.viewed) div.classList.add("viewed");
+  if (record.rejected) div.classList.add("rejected");
+  if (record.appliedConfirmed) div.classList.add("appliedConfirmed");
 
-  const title = document.createElement("h3");
-  title.textContent = job.title || "(untitled)";
-
-  const loc = document.createElement("p");
-  loc.textContent = job.location || "";
-
-  card.append(title, loc);
+  div.innerHTML = `<h3>${job.title}</h3><p>${job.location}</p>`;
 
   const actions = document.createElement("div");
   actions.className = "actions";
 
-  // Why
-  const whyBtn = document.createElement("button");
-  whyBtn.type = "button";
-  whyBtn.className = "whyicon";
+  // Why icon
+  const whyWrap = document.createElement("button");
+  whyWrap.className = "whyicon";
   const verdict = whyVerdict(job);
-  whyBtn.classList.add(verdict.color);
-  whyBtn.title = "Why";
+  whyWrap.classList.add(verdict.color);
+  whyWrap.title = "Why";
   const glyph = document.createElement("span");
   glyph.className = "whyglyph";
   glyph.textContent = "i";
-  whyBtn.appendChild(glyph);
-  whyBtn.onclick = () => showWhy(job);
+  whyWrap.appendChild(glyph);
+  whyWrap.onclick = () => showWhy(job);
+
+  // Applied
+  const appliedWrap = document.createElement("div");
+  appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
+  const applied = document.createElement("input");
+  applied.type = "checkbox";
+  applied.checked = !!record.appliedConfirmed;
+  applied.disabled = !record.viewed;
+  const appliedLabel = document.createElement("label");
+  appliedLabel.textContent = "Applied";
+  applied.onchange = () => {
+    if (!getRecord(id).viewed) { applied.checked = false; return; }
+    const next = setRecord(id, { appliedConfirmed: applied.checked }, job);
+    appliedWrap.classList.toggle("checked", next.appliedConfirmed);
+    div.classList.toggle("appliedConfirmed", next.appliedConfirmed);
+  };
+  appliedWrap.append(applied, appliedLabel);
 
   // View
-  const viewBtn = document.createElement("button");
-  viewBtn.type = "button";
-  viewBtn.className = "btn" + (record.viewed ? " touched" : "");
-  viewBtn.textContent = "View";
-  viewBtn.onclick = () => {
+  const btnView = document.createElement("button");
+  btnView.className = "btn" + (record.viewed ? " touched" : "");
+  btnView.textContent = "View";
+  btnView.onclick = () => {
     const next = setRecord(id, { viewed: true }, job);
-    card.classList.add("viewed");
-    viewBtn.classList.toggle("touched", next.viewed);
-    appliedCb.disabled = false;
+    div.classList.add("viewed");
+    btnView.classList.toggle("touched", next.viewed);
+    applied.disabled = false;
     if (!appliedWrap.parentElement) actions.appendChild(appliedWrap);
     if (job.url) window.open(job.url, "_blank");
   };
 
   // Reject
-  const rejectBtn = document.createElement("button");
-  rejectBtn.type = "button";
-  rejectBtn.className = "btn" + (record.rejected ? " touched" : "");
-  rejectBtn.textContent = "Reject";
-  rejectBtn.onclick = () => {
+  const btnReject = document.createElement("button");
+  btnReject.className = "btn" + (record.rejected ? " touched" : "");
+  btnReject.textContent = "Reject";
+  btnReject.onclick = () => {
     const next = setRecord(id, { rejected: true }, job);
-    card.classList.add("rejected");
-    rejectBtn.classList.toggle("touched", next.rejected);
-    blBtn.hidden = false;
+    div.classList.add("rejected");
+    btnReject.classList.toggle("touched", next.rejected);
+    btnBlacklist.hidden = false;
   };
 
-  // Applied (only after View)
-  const appliedWrap = document.createElement("div");
-  appliedWrap.className = "appliedWrap" + (record.appliedConfirmed ? " checked" : "");
-
-  const appliedCb = document.createElement("input");
-  appliedCb.type = "checkbox";
-  appliedCb.checked = !!record.appliedConfirmed;
-  appliedCb.disabled = !record.viewed;
-
-  const appliedLabel = document.createElement("label");
-  appliedLabel.textContent = "Applied";
-
-  appliedCb.onchange = () => {
-    if (!getRecord(id).viewed) {
-      appliedCb.checked = false;
-      return;
-    }
-    const next = setRecord(id, { appliedConfirmed: appliedCb.checked }, job);
-    appliedWrap.classList.toggle("checked", next.appliedConfirmed);
-    card.classList.toggle("appliedConfirmed", next.appliedConfirmed);
+  // Blacklist (appears after reject)
+  const btnBlacklist = document.createElement("button");
+  btnBlacklist.className = "btn";
+  btnBlacklist.textContent = "Blacklist";
+  btnBlacklist.hidden = !record.rejected;
+  btnBlacklist.onclick = () => {
+    div.querySelector(".bl-panel")?.remove();
+    div.appendChild(buildBlacklistPanel(job));
   };
 
-  appliedWrap.append(appliedCb, appliedLabel);
-
-  // Blacklist (only after Reject)
-  const blBtn = document.createElement("button");
-  blBtn.type = "button";
-  blBtn.className = "btn";
-  blBtn.textContent = "Blacklist";
-  blBtn.hidden = !record.rejected;
-  blBtn.onclick = () => {
-    const panel = buildBlacklistPanel(job, card);
-    card.appendChild(panel);
-  };
-
-  actions.append(whyBtn, viewBtn, rejectBtn, blBtn);
+  actions.append(whyWrap, btnView, btnReject, btnBlacklist);
   if (record.viewed) actions.appendChild(appliedWrap);
 
-  card.appendChild(actions);
-  return card;
+  div.appendChild(actions);
+  return div;
 }
 
 // ---------- Search ----------
@@ -842,7 +859,7 @@ async function runSearch() {
   state.rendered = {};
   state.currentResults = [];
 
-  loadMemory(); // latest
+  loadMemory();
 
   const tasks = [];
   for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
@@ -887,7 +904,6 @@ async function runSearch() {
       try {
         const chunk = await withTimeout(Promise.resolve().then(() => t.fn()), PER_SOURCE_TIMEOUT_MS);
         ok += 1;
-
         if (Array.isArray(chunk) && chunk.length) jobs.push(...chunk);
         else empty += 1;
       } catch (err) {
@@ -898,9 +914,7 @@ async function runSearch() {
 
       done += 1;
       setProgress((done / total) * 100);
-      setProgressNote(
-        `Checked ${done}/${total} | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`
-      );
+      setProgressNote(`Checked ${done}/${total} | ok:${ok} fail:${failed} timeout:${timedOut} empty:${empty}`);
     }
     return jobs;
   })();
@@ -923,6 +937,7 @@ async function runSearch() {
     .filter(j => !shouldHide(j))
     .filter(j => passesGates(j, relaxed))
     .filter(j => !evaluateExplicitRules(j))
+    .filter(j => whyVerdict(j).color !== "red")
     .slice(0, MAX_RESULTS);
 
   state.currentResults = filtered.slice();
@@ -949,6 +964,7 @@ function wire() {
   $("btnSave")?.addEventListener("click", saveSettings);
 
   $("btnRun")?.addEventListener("click", runSearch);
+
   $("btnClear")?.addEventListener("click", () => {
     // Conservative: clears job memory + staged rules, not sources.
     try { localStorage.removeItem(MEMORY_KEY); } catch {}

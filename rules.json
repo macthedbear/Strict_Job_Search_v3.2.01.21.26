@@ -1,193 +1,81 @@
 {
-  "version": "1.0",
+  "version": "1.2.012526",
   "explicitRules": [
-    {
-      "type": "location",
-      "value": "Canada"
-    },
-    {
-      "type": "location",
-      "value": "United Kingdom"
-    },
-    {
-      "type": "location",
-      "value": "UK"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Netherlands"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Ireland"
-    },
-    {
-      "type": "location",
-      "value": "Remote - United Kingdom"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Colombia"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Germany"
-    },
-    {
-      "type": "location",
-      "value": "Remote - France"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Spain"
-    },
-    {
-      "type": "location",
-      "value": "Remote - Australia"
-    },
-    {
-      "type": "location",
-      "value": "Dublin, Ireland"
-    },
-    {
-      "type": "title",
-      "value": "Account Executive"
-    },
-    {
-      "type": "title",
-      "value": "Account Executive, Corporate - UKI"
-    },
-    {
-      "type": "title",
-      "value": "Senior Software Engineer - Backend Remote Assistance"
-    },
-    {
-      "type": "title",
-      "value": "Product Consultant"
-    },
-    {
-      "type": "title",
-      "value": "AI Subject Matter Experts (Freelance / Remote)"
-    },
-    {
-      "type": "title",
-      "value": "External Contractor - Mentor role for Flying Car and Autonomous Flight Engineer track"
-    },
-    {
-      "type": "title",
-      "value": "External Contractor - Mentor role for Sensor Fusion Engineer track"
-    },
-    {
-      "type": "title",
-      "value": "Nanodegree"
-    },
-    {
-      "type": "title",
-      "value": "Lead Generative AI - Contractor"
-    },
-    {
-      "type": "title",
-      "value": "Account Executive - Strategic"
-    },
-    {
-      "type": "title",
-      "value": "Sales"
-    },
-    {
-      "type": "title",
-      "value": "Manager, AI & Automation"
-    },
-    {
-      "type": "title",
-      "value": "Director"
-    },
-    {
-      "type": "title",
-      "value": "Senior Director"
-    },
-    {
-      "type": "title",
-      "value": "VP"
-    },
-    {
-      "type": "title",
-      "value": "Vice President"
-    },
-    {
-      "type": "title",
-      "value": "Chief"
-    },
-    {
-      "type": "title",
-      "value": "Intern"
-    },
-    {
-      "type": "title",
-      "value": "Internship"
-    },
-    {
-      "type": "title",
-      "value": "Apprentice"
-    },
-    {
-      "type": "title",
-      "value": "Apprenticeship"
-    },
-    {
-      "type": "title",
-      "value": "Co-op"
-    },
-    {
-      "type": "title",
-      "value": "Coop"
-    },
-    {
-      "type": "title",
-      "value": "Graduate"
-    },
-    {
-      "type": "title",
-      "value": "Campus"
-    },
-    {
-      "type": "title",
-      "value": "University"
-    },
-    {
-      "type": "title",
-      "value": "Rotational"
-    },
-    {
-      "type": "title",
-      "value": "New Grad"
-    },
-    {
-      "type": "title",
-      "value": "New Graduate"
-    },
-    {
-      "type": "title",
-      "value": "new grad"
-    },
-    {
-      "type": "title",
-      "value": "new graduate"
-    },
-    {
-      "type": "title",
-      "value": "campus"
-    },
-    {
-      "type": "title",
-      "value": "university"
-    },
-    {
-      "type": "title",
-      "value": "intern"
-    },
-    {
-      "type": "title",
-      "value": "rotational"
-    }
+    { "type": "location", "value": "Canada" },
+    { "type": "location", "value": "United Kingdom" },
+    { "type": "location", "value": "UK" },
+    { "type": "location", "value": "Remote - Netherlands" },
+    { "type": "location", "value": "Remote - Ireland" },
+    { "type": "location", "value": "Remote - United Kingdom" },
+    { "type": "location", "value": "Remote - Colombia" },
+    { "type": "location", "value": "Remote - Germany" },
+    { "type": "location", "value": "Remote - France" },
+    { "type": "location", "value": "Remote - Spain" },
+    { "type": "location", "value": "Remote - Australia" },
+    { "type": "location", "value": "Dublin, Ireland" },
+
+    { "type": "title", "value": "Account Executive" },
+    { "type": "title", "value": "Account Executive, Corporate - UKI" },
+    { "type": "title", "value": "Senior Software Engineer - Backend Remote Assistance" },
+    { "type": "title", "value": "Product Consultant" },
+    { "type": "title", "value": "AI Subject Matter Experts (Freelance / Remote)" },
+    { "type": "title", "value": "External Contractor - Mentor role for Flying Car and Autonomous Flight Engineer track" },
+    { "type": "title", "value": "External Contractor - Mentor role for Sensor Fusion Engineer track" },
+    { "type": "title", "value": "Nanodegree" },
+    { "type": "title", "value": "Lead Generative AI - Contractor" },
+    { "type": "title", "value": "Account Executive - Strategic" },
+    { "type": "title", "value": "Sales" },
+    { "type": "title", "value": "Manager, AI & Automation" },
+    { "type": "title", "value": "Director" },
+    { "type": "title", "value": "Senior Director" },
+    { "type": "title", "value": "VP" },
+    { "type": "title", "value": "Vice President" },
+    { "type": "title", "value": "Chief" },
+    { "type": "title", "value": "Intern" },
+    { "type": "title", "value": "Internship" },
+    { "type": "title", "value": "Apprentice" },
+    { "type": "title", "value": "Apprenticeship" },
+    { "type": "title", "value": "Co-op" },
+    { "type": "title", "value": "Coop" },
+    { "type": "title", "value": "Graduate" },
+    { "type": "title", "value": "Campus" },
+    { "type": "title", "value": "University" },
+    { "type": "title", "value": "Rotational" },
+    { "type": "title", "value": "New Grad" },
+    { "type": "title", "value": "New Graduate" },
+    { "type": "title", "value": "new grad" },
+    { "type": "title", "value": "new graduate" },
+    { "type": "title", "value": "campus" },
+    { "type": "title", "value": "university" },
+    { "type": "title", "value": "intern" },
+    { "type": "title", "value": "rotational" },
+
+    { "type": "title", "value": "Federal Systems Integrator" },
+    { "type": "title", "value": "FSI Lead" },
+    { "type": "title", "value": "Channel Lead" },
+    { "type": "title", "value": "Partner Enablement" },
+    { "type": "title", "value": "Partner Ecosystem" },
+    { "type": "title", "value": "Alliance Manager" },
+    { "type": "title", "value": "Distributor Relations" },
+    { "type": "title", "value": "Public Sector Partnerships" },
+
+    { "type": "keyword", "value": "based in the washington, d.c. area (required)" },
+    { "type": "keyword", "value": "based in the washington, dc area (required)" },
+    { "type": "keyword", "value": "proximity is critical" },
+    { "type": "keyword", "value": "must be located in" },
+    { "type": "keyword", "value": "required to be in" },
+    { "type": "keyword", "value": "federal ecosystem" },
+
+    { "type": "keyword", "value": "partner recruitment" },
+    { "type": "keyword", "value": "partner onboarding" },
+    { "type": "keyword", "value": "sell-through model" },
+    { "type": "keyword", "value": "channel gtm execution" },
+    { "type": "keyword", "value": "distributor coordination" },
+    { "type": "keyword", "value": "carahsoft" },
+    { "type": "keyword", "value": "var" },
+    { "type": "keyword", "value": "si" },
+
+    { "type": "keyword", "value": "federal" },
+    { "type": "keyword", "value": "public sector" }
   ]
 }

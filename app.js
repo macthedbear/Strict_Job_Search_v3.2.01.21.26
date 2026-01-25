@@ -11,6 +11,12 @@
 // 5) Strict vs Relaxed gates restored (strict hides non-remote, relaxed keeps + signals).
 // 6) NEW: Red means hard-exclude: red cards never render.
 //
+// Additional (v01-24-26):
+// A) Hard-exclude Canada in multi-location "Remote" strings (CAN / Toronto / Ontario etc).
+// B) Harden rules availability: if index.js fails or is late, fetch rules.json once.
+// C) Prioritize higher-signal cards: sort green before yellow before slice.
+// D) Replace "i" glyph with WhyIcon.png (YICONPNG / WhyIcon.png).
+//
 // Notes:
 // • DOM is a view; localStorage + in-memory state are authoritative.
 // • No CSS change required.
@@ -25,14 +31,17 @@ const state = {
 
   memory: {},          // jobId -> { viewed, rejected, appliedConfirmed, job }
   rendered: {},        // jobId -> job (for current results view)
-  currentResults: []   // canonical on-screen list used for purge + rerender
+  currentResults: [],  // canonical on-screen list used for purge + rerender
+
+  // Durable rules fallback cache (only used if index.js contract is missing/late)
+  durableRulesFallback: null
 };
 
 const MAX_RESULTS = 15;
 const MEMORY_KEY = "jobMemoryV3";
 const STAGED_RULES_KEY = "sjs_staged_rules_v1";
 
-const TIMEOUT_MS = 180000;          // whole-run hard stop
+const TIMEOUT_MS = 180000;           // whole-run hard stop
 const PER_SOURCE_TIMEOUT_MS = 12000; // per-source timeout
 const PROGRESS_BASELINE_PCT = 6;
 
@@ -87,7 +96,7 @@ function toast(msg) {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:0 0 0 3px rgba(255,215,64,.95), 0 0 10px rgba(255,215,64,.65); }
+    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,210,70,.35); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
     .whyicon .whyglyph{
@@ -224,6 +233,23 @@ function setMode(m) {
   toast(state.mode === "strict" ? "Strict" : "Relaxed");
 }
 
+// ---------- Durable rules fallback (if index.js contract is missing/late) ----------
+async function ensureDurableRulesLoaded() {
+  if (Array.isArray(window.APP_STATE?.rules?.explicitRules)) return true;
+  if (state.durableRulesFallback && Array.isArray(state.durableRulesFallback.explicitRules)) return true;
+
+  try {
+    const res = await fetch("./rules.json", { cache: "no-store" });
+    if (!res.ok) return false;
+    const json = await res.json().catch(() => null);
+    if (!json || !Array.isArray(json.explicitRules)) return false;
+    state.durableRulesFallback = json;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Staged rules ----------
 function loadStagedRulesFallback() {
   const raw = localStorage.getItem(STAGED_RULES_KEY);
@@ -236,9 +262,9 @@ function saveStagedRulesFallback(arr) {
 }
 
 function getDurableRules() {
-  return Array.isArray(window.APP_STATE?.rules?.explicitRules)
-    ? window.APP_STATE.rules.explicitRules
-    : [];
+  if (Array.isArray(window.APP_STATE?.rules?.explicitRules)) return window.APP_STATE.rules.explicitRules;
+  if (Array.isArray(state.durableRulesFallback?.explicitRules)) return state.durableRulesFallback.explicitRules;
+  return [];
 }
 
 function getStagedRules() {
@@ -274,12 +300,35 @@ function stageRule(rule) {
   refreshDirtyUI();
 }
 
+// ---------- Location normalization helpers ----------
+function hasCanadaSignal(locRaw) {
+  const raw = String(locRaw || "");
+  if (!raw) return false;
+
+  // Strong signals:
+  // 1) explicit "Canada"
+  // 2) country code "CAN" as a token (often "Toronto, Ontario, CAN - Remote")
+  // 3) common Canadian geo tokens (kept tight; avoid "CA" due to California ambiguity)
+  if (/\bcanada\b/i.test(raw)) return true;
+  if (/\bCAN\b/.test(raw)) return true;
+
+  // Province/major city tokens used in remote strings
+  if (/\bontario\b/i.test(raw)) return true;
+  if (/\btoronto\b/i.test(raw)) return true;
+  if (/\bvancouver\b/i.test(raw)) return true;
+  if (/\bmontreal\b/i.test(raw)) return true;
+  if (/\bottawa\b/i.test(raw)) return true;
+
+  return false;
+}
+
 function evaluateExplicitRules(job) {
   const rules = getDurableRules().concat(getStagedRules());
 
   const comp = norm(job.company);
   const title = norm(job.title);
   const loc = norm(job.location);
+  const locRaw = String(job.location || "");
   const text = norm(job.title + " " + job.location + " " + (job.description || ""));
 
   for (const r of rules) {
@@ -288,9 +337,20 @@ function evaluateExplicitRules(job) {
     if (!rt || !rv) continue;
 
     if (rt === "company" && comp === rv) return true;
+
     if (rt === "title" && title.includes(rv)) return true;
-    if (rt === "location" && loc.includes(rv)) return true;
+
     if (rt === "keyword" && text.includes(rv)) return true;
+
+    if (rt === "location") {
+      // Baseline substring match
+      if (loc.includes(rv)) return true;
+
+      // Harden Canada semantics: "Canada" rule should catch CAN and common Canada tokens.
+      if (rv === "canada" && hasCanadaSignal(locRaw)) return true;
+
+      // UK variants (already in your rules as "UK" and "United Kingdom") are handled by substring includes.
+    }
   }
   return false;
 }
@@ -386,6 +446,10 @@ function whyVerdict(job) {
   if (contra) return { color: "red", reason: `Title contradiction: ${contra}` };
 
   const locRaw = String(job?.location || "").trim();
+
+  // Harden Canada: even if the rule list is late/missing, keep strict remote feed from surfacing Canada.
+  if (hasCanadaSignal(locRaw)) return { color: "red", reason: "Canada signal in location" };
+
   const loc = norm(locRaw);
 
   if (!loc) return { color: "yellow", reason: "Missing location string" };
@@ -413,6 +477,7 @@ function whyVerdict(job) {
       /,\s*[A-Z]{2}\b/.test(locRaw) ||
       /\b(seattle|san\s*francisco|sf\b|bay\s*area|new\s*york|nyc|austin|boston|chicago|denver|los\s*angeles|la\b|atlanta|dallas|miami|portland|phoenix|san\s*diego|washington\s*dc|dc\b)\b/i.test(locRaw);
 
+    // "US DC - Remote" should land here as Yellow (location constraint signal).
     if (hasHardConstraint || hasCitySignal) return { color: "yellow", reason: "Remote with location constraint" };
 
     if (isRemote && !looksLikeUSLocation(locRaw) && !(loc.includes("united states") || loc.includes("usa") || loc.includes("us"))) {
@@ -603,7 +668,7 @@ function refreshDirtyUI() {
 }
 
 function exportRulesJsonPayload() {
-  const durable = window.APP_STATE?.rules || { version: "1", explicitRules: [] };
+  const durable = window.APP_STATE?.rules || state.durableRulesFallback || { version: "1", explicitRules: [] };
   const staged = getStagedRules() || [];
   return {
     version: durable.version || "1",
@@ -774,16 +839,27 @@ function renderJob(job) {
   const actions = document.createElement("div");
   actions.className = "actions";
 
-  // Why icon
+  // Why icon (image asset)
   const whyWrap = document.createElement("button");
   whyWrap.className = "whyicon";
   const verdict = whyVerdict(job);
   whyWrap.classList.add(verdict.color);
   whyWrap.title = "Why";
-  const glyph = document.createElement("span");
-  glyph.className = "whyglyph";
-  glyph.textContent = "i";
-  whyWrap.appendChild(glyph);
+
+  const img = document.createElement("img");
+  img.src = "WhyIcon.png";        // YICONPNG / WhyIcon.png
+  img.alt = "Why";
+  img.loading = "lazy";
+  img.onerror = () => {
+    // Fail-soft: if asset missing, fall back to glyph without breaking layout.
+    whyWrap.innerHTML = "";
+    const glyph = document.createElement("span");
+    glyph.className = "whyglyph";
+    glyph.textContent = "i";
+    whyWrap.appendChild(glyph);
+  };
+  whyWrap.appendChild(img);
+
   whyWrap.onclick = () => showWhy(job);
 
   // Applied
@@ -851,6 +927,18 @@ async function withTimeout(promise, ms) {
   return Promise.race([promise, t]).finally(() => { if (h) clearTimeout(h); });
 }
 
+function scoreVerdictColor(color) {
+  if (color === "green") return 0;
+  if (color === "yellow") return 1;
+  return 2; // red last (though red is filtered out)
+}
+
+function scoreJob(job) {
+  // Lower is better.
+  const v = whyVerdict(job);
+  return scoreVerdictColor(v.color);
+}
+
 async function runSearch() {
   const out = $("results");
   if (!out) return;
@@ -860,6 +948,9 @@ async function runSearch() {
   state.currentResults = [];
 
   loadMemory();
+
+  // Ensure durable rules are available even if index.js contract is missing/late.
+  await ensureDurableRulesLoaded();
 
   const tasks = [];
   for (const g of state.greenhouse) tasks.push({ type: "Greenhouse", label: g, fn: () => fetchGreenhouse(g) });
@@ -933,11 +1024,13 @@ async function runSearch() {
 
   const relaxed = (state.mode === "relaxed");
 
+  // Filter first, then rank, then slice (prevents low-signal crowding).
   const filtered = uniq
     .filter(j => !shouldHide(j))
     .filter(j => passesGates(j, relaxed))
     .filter(j => !evaluateExplicitRules(j))
     .filter(j => whyVerdict(j).color !== "red")
+    .sort((a, b) => scoreJob(a) - scoreJob(b))
     .slice(0, MAX_RESULTS);
 
   state.currentResults = filtered.slice();

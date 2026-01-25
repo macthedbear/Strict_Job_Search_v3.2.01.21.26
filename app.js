@@ -129,7 +129,7 @@ async function ensureDurableRulesLoaded() {
       cursor:pointer;
     }
     .whyicon.green{ box-shadow:0 0 0 2px rgba(100,255,100,.35); }
-    .whyicon.yellow{ box-shadow:none; }
+    .whyicon.yellow{ box-shadow:0 0 0 2px rgba(255,215,90,.70); }
     .whyicon.red{ box-shadow:0 0 0 2px rgba(255,90,90,.35); }
     .whyicon img{ width:100%; height:100%; object-fit:contain; }
 
